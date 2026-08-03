@@ -198,6 +198,7 @@ type PaymentService struct {
 	resumeService            *PaymentResumeService
 	affiliateService         *AffiliateService
 	notificationEmailService *NotificationEmailService
+	fxService                *FXService // v4.6.2 currency separation
 }
 
 func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
@@ -208,6 +209,12 @@ func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, load
 
 func (s *PaymentService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
 	s.notificationEmailService = notificationEmailService
+}
+
+// SetFXService 注入 FX 服务（v4.6.2 currency separation）。
+// 由 cmd/server wire 或 main 启动时调用。
+func (s *PaymentService) SetFXService(fx *FXService) {
+	s.fxService = fx
 }
 
 // --- Provider Registry ---

@@ -90,6 +90,21 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 			return nil, err
 		}
 	}
+	// === v4.6.2 currency separation: 余额到账按选中的支付渠道币种换算（主人规范 2026-08-02）===
+	// 选 sel + selectedCurrency 之后做换算，避免重复计算；只对余额单生效（订阅走自己的换算）。
+	if req.OrderType == payment.OrderTypeBalance && plan == nil {
+		settlementCurrency := cfg.SettlementCurrency
+		if settlementCurrency == "" {
+			settlementCurrency = "USD"
+		}
+		var fxRate float64
+		if s.fxService != nil && selectedCurrency != settlementCurrency {
+			fxRate = s.fxService.GetRate(ctx, selectedCurrency, settlementCurrency, cfg.FXApiURL, cfg.FXFallbackRate)
+		}
+		orderAmount = calculateCreditedBalanceWithConversion(
+			req.Amount, cfg.BalanceRechargeMultiplier,
+			selectedCurrency, settlementCurrency, fxRate)
+	}
 	if err := validateSelectedCreateOrderAmountCurrency(payAmountStr, sel); err != nil {
 		return nil, err
 	}
