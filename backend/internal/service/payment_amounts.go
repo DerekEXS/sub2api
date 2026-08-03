@@ -31,12 +31,13 @@ func normalizeSubscriptionUSDToCNYRate(rate float64) float64 {
 // NormalizePaymentCurrency 带默认值的币种归一化（空值/非法值返 defaultVal）。
 // 与 payment.NormalizePaymentCurrency 不同：后者空值返 "CNY" 硬编码。
 func NormalizePaymentCurrency(raw, defaultVal string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultVal
+	}
 	v, err := payment.NormalizePaymentCurrency(raw)
-	if err != nil || v == "" || v == payment.DefaultPaymentCurrency && defaultVal != "" && raw == "" {
-		// 仅当 raw 真的为空/非法时返 defaultVal
-		if err != nil || strings.TrimSpace(raw) == "" {
-			return defaultVal
-		}
+	if err != nil || v == "" {
+		return defaultVal
 	}
 	return v
 }

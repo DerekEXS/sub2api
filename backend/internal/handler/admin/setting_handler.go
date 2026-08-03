@@ -334,6 +334,11 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentBalanceRechargeMultiplier:                       paymentCfg.BalanceRechargeMultiplier,
 		PaymentSubscriptionUSDToCNYRate:                        paymentCfg.SubscriptionUSDToCNYRate,
 		PaymentRechargeFeeRate:                                 paymentCfg.RechargeFeeRate,
+		// === v4.6.2 currency separation ===
+		PaymentSettlementCurrency: paymentCfg.SettlementCurrency,
+		PaymentRechargeCurrency:   paymentCfg.RechargeCurrency,
+		PaymentFXApiURL:           paymentCfg.FXApiURL,
+		PaymentFXFallbackRate:     paymentCfg.FXFallbackRate,
 		PaymentLoadBalanceStrat:                                paymentCfg.LoadBalanceStrategy,
 		PaymentProductNamePrefix:                               paymentCfg.ProductNamePrefix,
 		PaymentProductNameSuffix:                               paymentCfg.ProductNameSuffix,
