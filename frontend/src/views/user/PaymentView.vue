@@ -51,6 +51,7 @@
                 :amounts="[10, 20, 50, 100, 200, 500, 1000, 2000, 5000]"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
+                :currency-symbol="currencySymbol(settlementCurrency)"
               />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
             </div>
@@ -65,26 +66,29 @@
               <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.paymentAmount') }}</span>
-                  <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(validAmount) }}</span>
+                  <span class="text-gray-900 dark:text-white">{{ formatSettlementAmount(validAmount) }}</span>
                 </div>
                 <div v-if="feeRate > 0" class="flex justify-between">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
-                  <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(feeAmount) }}</span>
+                  <span class="text-gray-900 dark:text-white">{{ formatSettlementAmount(feeAmount) }}</span>
                 </div>
                 <div v-if="feeRate > 0" class="flex justify-between border-t border-gray-200 pt-2 dark:border-dark-600">
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
-                  <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
+                  <!-- v4.6.2: 渠道实付按渠道货币显示（EPAY 收 CNY） -->
+                  <span class="text-lg font-bold text-primary-600 dark:text-primary-400">
+                    {{ isCrossCurrency ? `${currencySymbol(channelCurrency)}${channelPayAmount.toFixed(2)} ${channelCurrency}` : formatSelectedPaymentAmount(totalAmount) }}
+                  </span>
                 </div>
                 <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
-                  <!-- v4.6.2: 显示用结算币符号（USD=$/CNY=¥/EUR=€） -->
-                  <span class="text-gray-900 dark:text-white">{{ currencySymbol(settlementCurrency) }}{{ (isCrossCurrency ? creditedAmountConverted : creditedAmount).toFixed(2) }} {{ settlementCurrency }}</span>
+                  <!-- v4.6.2: 到账始终是结算货币（USD） -->
+                  <span class="text-gray-900 dark:text-white">{{ currencySymbol(settlementCurrency) }}{{ creditedAmount.toFixed(2) }} {{ settlementCurrency }}</span>
                 </div>
                 <p v-if="isCrossCurrency" class="border-t border-gray-200 pt-2 text-xs text-amber-600 dark:text-amber-400">
-                  跨币种换算：{{ currencySymbol(selectedCurrency) }}{{ validAmount.toFixed(2) }} {{ selectedCurrency }} → {{ currencySymbol(settlementCurrency) }}{{ creditedAmountConverted.toFixed(2) }} {{ settlementCurrency }}（按汇率 1 {{ selectedCurrency }} ≈ {{ (settlementCurrency === 'USD' ? 1 / fxFallbackRate : fxFallbackRate).toFixed(4) }} {{ settlementCurrency }}）
+                  输入 {{ currencySymbol(settlementCurrency) }}{{ validAmount.toFixed(2) }} {{ settlementCurrency }} → 渠道实收 {{ currencySymbol(channelCurrency) }}{{ channelPayAmount.toFixed(2) }} {{ channelCurrency }} → 到账 {{ currencySymbol(settlementCurrency) }}{{ creditedAmount.toFixed(2) }} {{ settlementCurrency }}（按汇率 1 {{ settlementCurrency }} ≈ {{ fxRateFor(settlementCurrency, channelCurrency).toFixed(4) }} {{ channelCurrency }}）
                 </p>
                 <p v-else-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
-                  {{ t('payment.rechargeRatePreview', { usd: balanceRechargeMultiplier.toFixed(2) }) }}
+                  {{ t('payment.rechargeRatePreview', { cc: settlementCurrency, usd: balanceRechargeMultiplier.toFixed(2), sc: settlementCurrency }) }}
                 </p>
               </div>
             </div>
@@ -93,7 +97,7 @@
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
-              <span v-else>{{ t('payment.createOrder') }} {{ formatSelectedPaymentAmount(totalAmount) }}</span>
+              <span v-else>{{ t('payment.createOrder') }} {{ formatSettlementAmount(totalAmount) }}</span>
             </button>
             </template>
           </template>
@@ -531,27 +535,35 @@ const subscriptionUsdToCnyRate = computed(() => {
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
-// === v4.6.2 currency separation ===
+// === v4.6.2 currency separation (主人规范：输入 USD → 渠道收 CNY → 到账 USD) ===
 const settlementCurrency = computed(() => checkout.value?.settlement_currency || 'USD')
 const fxFallbackRate = computed(() => checkout.value?.fx_fallback_rate || 6.8)
-// 是否跨币种（网关 CNY ≠ 结算 USD）：触发换算提示
+// 渠道货币（EPAY=CNY）
+const channelCurrency = computed(() => selectedCurrency.value || 'CNY')
+// 是否跨币种（渠道 CNY ≠ 结算 USD）：需要换算
 const isCrossCurrency = computed(() => {
   const sel = selectedCurrency.value
-  return sel !== settlementCurrency.value && sel && settlementCurrency.value
+  return sel && settlementCurrency.value && sel !== settlementCurrency.value
 })
-// 按 fallback rate 估算到账（与后端 fallbackCrossViaUSD 同步）
-function estimateCredited(amount: number): number {
-  if (!isCrossCurrency.value || amount <= 0) return amount * balanceRechargeMultiplier.value
-  const from = selectedCurrency.value
-  const to = settlementCurrency.value
+// 汇率：结算货币 → 渠道货币（如 USD→CNY = 7）。与后端 fallbackCrossViaUSD 同步。
+function fxRateFor(from: string, to: string): number {
   const r = fxFallbackRate.value || 6.8
-  // 简易换算：from=USD,to=CNY=r; from=CNY,to=USD=1/r; 其他 1:1 占位
-  let rate = 1
-  if (from === 'USD' && to === 'CNY') rate = r
-  else if (from === 'CNY' && to === 'USD') rate = 1 / r
-  return amount * balanceRechargeMultiplier.value * rate
+  if (from === to) return 1
+  if (from === 'USD' && to === 'CNY') return r
+  if (from === 'CNY' && to === 'USD') return 1 / r
+  if (from === 'USD' && to === 'EUR') return 1
+  if (from === 'EUR' && to === 'USD') return 1
+  if (from === 'EUR' && to === 'CNY') return r
+  if (from === 'CNY' && to === 'EUR') return 1 / r
+  return 1
 }
-const creditedAmountConverted = computed(() => Math.round(estimateCredited(validAmount.value) * 100) / 100)
+// 渠道实付（结算货币 × 汇率 → 渠道货币，含手续费）
+const channelPayAmount = computed(() => {
+  if (validAmount.value <= 0) return 0
+  const withFee = totalAmount.value // 含手续费（结算货币）
+  if (!isCrossCurrency.value) return withFee
+  return Math.round(withFee * fxRateFor(settlementCurrency.value, channelCurrency.value) * 100) / 100
+})
 // v4.6.2: 三币种符号映射
 function currencySymbol(c: string | undefined): string {
   switch ((c || '').toUpperCase()) {
@@ -636,6 +648,11 @@ function subscriptionPaymentAmountForCurrency(value: number, currency: string): 
 
 function formatSelectedPaymentAmount(value: number): string {
   return formatPaymentAmount(value, selectedCurrency.value, localeCode.value)
+}
+
+// v4.6.2: 按结算货币格式化（输入/到账/手续费都是结算货币单位）
+function formatSettlementAmount(value: number): string {
+  return formatPaymentAmount(value, settlementCurrency.value, localeCode.value)
 }
 
 function formatSelectedSubscriptionPaymentAmount(value: number): string {
