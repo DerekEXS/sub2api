@@ -75,6 +75,7 @@ export interface CheckoutInfoResponse {
   settlement_currency: string  // 结算币（默认 USD：到账余额单位）
   recharge_currency: string    // 充值币（默认 CNY：支付页面输入货币）
   fx_fallback_rate: number     // 固定汇率（CNY per USD）
+  fx_rate: number              // 实时汇率（API 优先），0=不可用（前端回退固定汇率）
   help_text: string
   help_image_url: string
   stripe_publishable_key: string

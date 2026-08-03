@@ -217,6 +217,20 @@ func (s *PaymentService) SetFXService(fx *FXService) {
 	s.fxService = fx
 }
 
+// GetCheckoutFXRate 返回结算货币→渠道货币的实时汇率（v4.6.2）。
+// 供 checkout-info 返回给前端做充值页预估显示（API 汇率优先，固定汇率兜底）。
+// 返回 0 表示不可用（前端应回退用固定汇率显示）。
+func (s *PaymentService) GetCheckoutFXRate(ctx context.Context, from, to string) float64 {
+	if s == nil || s.fxService == nil || s.configService == nil {
+		return 0
+	}
+	cfg, err := s.configService.GetPaymentConfig(ctx)
+	if err != nil {
+		return 0
+	}
+	return s.fxService.GetRate(ctx, from, to, fxAPICandidates(cfg), cfg.FXFallbackRate)
+}
+
 // --- Provider Registry ---
 
 // EnsureProviders lazily initializes the provider registry on first call.

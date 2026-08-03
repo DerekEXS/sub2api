@@ -511,7 +511,7 @@ function onPaymentSettled() {
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
   plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0,
-  settlement_currency: 'USD', recharge_currency: 'CNY', fx_fallback_rate: 6.8,
+  settlement_currency: 'USD', recharge_currency: 'CNY', fx_fallback_rate: 6.8, fx_rate: 0,
   help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
@@ -538,6 +538,11 @@ const creditedAmount = computed(() => Math.round((validAmount.value * balanceRec
 // === v4.6.2 currency separation (主人规范：输入 USD → 渠道收 CNY → 到账 USD) ===
 const settlementCurrency = computed(() => checkout.value?.settlement_currency || 'USD')
 const fxFallbackRate = computed(() => checkout.value?.fx_fallback_rate || 6.8)
+// 实时汇率（checkout-info 后端拉取，API 优先）—— 0=不可用
+const liveFXRate = computed(() => {
+  const r = checkout.value?.fx_rate
+  return Number.isFinite(r) && r > 0 ? r : 0
+})
 // 渠道货币（EPAY=CNY）
 const channelCurrency = computed(() => selectedCurrency.value || 'CNY')
 // 是否跨币种（渠道 CNY ≠ 结算 USD）：需要换算
@@ -545,8 +550,12 @@ const isCrossCurrency = computed(() => {
   const sel = selectedCurrency.value
   return sel && settlementCurrency.value && sel !== settlementCurrency.value
 })
-// 汇率：结算货币 → 渠道货币（如 USD→CNY = 7）。与后端 fallbackCrossViaUSD 同步。
+// 汇率：结算货币 → 渠道货币（如 USD→CNY）。优先后端实时汇率（API），无则固定汇率兜底。
 function fxRateFor(from: string, to: string): number {
+  // 主路径（结算→渠道）：用后端实时汇率（与订单实际扣款一致）
+  if (from === settlementCurrency.value && to === channelCurrency.value && liveFXRate.value > 0) {
+    return liveFXRate.value
+  }
   const r = fxFallbackRate.value || 6.8
   if (from === to) return 1
   if (from === 'USD' && to === 'CNY') return r
