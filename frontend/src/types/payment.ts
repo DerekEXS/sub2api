@@ -71,6 +71,10 @@ export interface CheckoutInfoResponse {
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
+  // === v4.6.2 currency separation ===
+  settlement_currency: string  // 结算币（默认 USD：到账余额单位）
+  recharge_currency: string    // 充值币（默认 CNY：支付页面输入货币）
+  fx_fallback_rate: number     // 固定汇率（CNY per USD）
   help_text: string
   help_image_url: string
   stripe_publishable_key: string

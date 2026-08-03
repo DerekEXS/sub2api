@@ -149,6 +149,10 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		BalanceRechargeMultiplier:     cfg.BalanceRechargeMultiplier,
 		SubscriptionUSDToCNYRate:      cfg.SubscriptionUSDToCNYRate,
 		RechargeFeeRate:               cfg.RechargeFeeRate,
+		// v4.6.2 currency separation
+		SettlementCurrency: cfg.SettlementCurrency,
+		RechargeCurrency:   cfg.RechargeCurrency,
+		FXFallbackRate:     cfg.FXFallbackRate,
 		HelpText:                      cfg.HelpText,
 		HelpImageURL:                  cfg.HelpImageURL,
 		StripePublishableKey:          cfg.StripePublishableKey,
@@ -166,6 +170,10 @@ type checkoutInfoResponse struct {
 	BalanceRechargeMultiplier     float64                         `json:"balance_recharge_multiplier"`
 	SubscriptionUSDToCNYRate      float64                         `json:"subscription_usd_to_cny_rate"`
 	RechargeFeeRate               float64                         `json:"recharge_fee_rate"`
+	// === v4.6.2 currency separation ===
+	SettlementCurrency string  `json:"settlement_currency"`
+	RechargeCurrency   string  `json:"recharge_currency"`
+	FXFallbackRate     float64 `json:"fx_fallback_rate"`
 	HelpText                      string                          `json:"help_text"`
 	HelpImageURL                  string                          `json:"help_image_url"`
 	StripePublishableKey          string                          `json:"stripe_publishable_key"`

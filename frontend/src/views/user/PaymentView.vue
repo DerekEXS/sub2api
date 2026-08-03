@@ -77,9 +77,13 @@
                 </div>
                 <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
-                  <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
+                  <!-- v4.6.2: 显示用结算币符号（USD=$/CNY=¥/EUR=€） -->
+                  <span class="text-gray-900 dark:text-white">{{ currencySymbol(settlementCurrency) }}{{ (isCrossCurrency ? creditedAmountConverted : creditedAmount).toFixed(2) }} {{ settlementCurrency }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                <p v-if="isCrossCurrency" class="border-t border-gray-200 pt-2 text-xs text-amber-600 dark:text-amber-400">
+                  跨币种换算：{{ currencySymbol(selectedCurrency) }}{{ validAmount.toFixed(2) }} {{ selectedCurrency }} → {{ currencySymbol(settlementCurrency) }}{{ creditedAmountConverted.toFixed(2) }} {{ settlementCurrency }}（按汇率 1 {{ selectedCurrency }} ≈ {{ (settlementCurrency === 'USD' ? 1 / fxFallbackRate : fxFallbackRate).toFixed(4) }} {{ settlementCurrency }}）
+                </p>
+                <p v-else-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
                   {{ t('payment.rechargeRatePreview', { usd: balanceRechargeMultiplier.toFixed(2) }) }}
                 </p>
               </div>
@@ -525,6 +529,37 @@ const subscriptionUsdToCnyRate = computed(() => {
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+// === v4.6.2 currency separation ===
+const settlementCurrency = computed(() => checkout.value?.settlement_currency || 'USD')
+const rechargeCurrency = computed(() => checkout.value?.recharge_currency || 'CNY')
+const fxFallbackRate = computed(() => checkout.value?.fx_fallback_rate || 6.8)
+// 是否跨币种（网关 CNY ≠ 结算 USD）：触发换算提示
+const isCrossCurrency = computed(() => {
+  const sel = selectedCurrency.value
+  return sel !== settlementCurrency.value && sel && settlementCurrency.value
+})
+// 按 fallback rate 估算到账（与后端 fallbackCrossViaUSD 同步）
+function estimateCredited(amount: number): number {
+  if (!isCrossCurrency.value || amount <= 0) return amount * balanceRechargeMultiplier.value
+  const from = selectedCurrency.value
+  const to = settlementCurrency.value
+  const r = fxFallbackRate.value || 6.8
+  // 简易换算：from=USD,to=CNY=r; from=CNY,to=USD=1/r; 其他 1:1 占位
+  let rate = 1
+  if (from === 'USD' && to === 'CNY') rate = r
+  else if (from === 'CNY' && to === 'USD') rate = 1 / r
+  return amount * balanceRechargeMultiplier.value * rate
+}
+const creditedAmountConverted = computed(() => Math.round(estimateCredited(validAmount.value) * 100) / 100)
+// v4.6.2: 三币种符号映射
+function currencySymbol(c: string | undefined): string {
+  switch ((c || '').toUpperCase()) {
+    case 'USD': return '$'
+    case 'CNY': return '¥'
+    case 'EUR': return '€'
+    default: return ''
+  }
+}
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {
