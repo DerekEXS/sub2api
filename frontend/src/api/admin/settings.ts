@@ -601,6 +601,11 @@ export interface SystemSettings {
   payment_balance_recharge_multiplier: number;
   payment_subscription_usd_to_cny_rate: number;
   payment_recharge_fee_rate: number;
+  // === v4.6.2 currency separation ===
+  payment_settlement_currency: string;
+  payment_recharge_currency: string;
+  payment_fx_api_url: string;
+  payment_fx_fallback_rate: number;
   payment_load_balance_strategy: string;
   payment_product_name_prefix: string;
   payment_product_name_suffix: string;
@@ -890,6 +895,11 @@ export interface UpdateSettingsRequest {
   payment_balance_recharge_multiplier?: number;
   payment_subscription_usd_to_cny_rate?: number;
   payment_recharge_fee_rate?: number;
+  // === v4.6.2 currency separation ===
+  payment_settlement_currency?: string;
+  payment_recharge_currency?: string;
+  payment_fx_api_url?: string;
+  payment_fx_fallback_rate?: number;
   payment_load_balance_strategy?: string;
   payment_product_name_prefix?: string;
   payment_product_name_suffix?: string;

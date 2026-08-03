@@ -7195,6 +7195,87 @@
                       }}
                     </p>
                   </div>
+                  <!-- === v4.6.2 currency separation (owner spec 2026-08-02) === -->
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.settlementCurrency")
+                    }}</label>
+                    <select
+                      v-model="form.payment_settlement_currency"
+                      class="input"
+                      data-testid="payment-settlement-currency"
+                    >
+                      <option value="USD">{{ t("admin.settings.payment.currencyUsd") }}</option>
+                      <option value="CNY">{{ t("admin.settings.payment.currencyCny") }}</option>
+                      <option value="EUR">{{ t("admin.settings.payment.currencyEur") }}</option>
+                    </select>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.settlementCurrencyHint") }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.rechargeCurrency")
+                    }}</label>
+                    <select
+                      v-model="form.payment_recharge_currency"
+                      class="input"
+                      data-testid="payment-recharge-currency"
+                    >
+                      <option value="USD">{{ t("admin.settings.payment.currencyUsd") }}</option>
+                      <option value="CNY">{{ t("admin.settings.payment.currencyCny") }}</option>
+                      <option value="EUR">{{ t("admin.settings.payment.currencyEur") }}</option>
+                    </select>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.rechargeCurrencyHint") }}
+                    </p>
+                    <p
+                      v-if="form.payment_settlement_currency && form.payment_recharge_currency && form.payment_settlement_currency !== form.payment_recharge_currency"
+                      class="mt-1 text-xs font-medium text-primary-600 dark:text-primary-400"
+                    >
+                      {{ t("admin.settings.payment.currencySeparationPreview", {
+                        recharge: '6.89', rc: form.payment_recharge_currency,
+                        pay: '6.89', pc: form.payment_recharge_currency,
+                        credit: '1.00', sc: form.payment_settlement_currency,
+                      }) }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.fxApiUrl")
+                    }}</label>
+                    <input
+                      v-model="form.payment_fx_api_url"
+                      type="url"
+                      class="input"
+                      :placeholder="t('admin.settings.payment.fxApiUrlPlaceholder')"
+                      data-testid="payment-fx-api-url"
+                    />
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.fxApiUrlHint") }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.fxFallbackRate")
+                    }}</label>
+                    <input
+                      :value="form.payment_fx_fallback_rate || ''"
+                      @input="
+                        form.payment_fx_fallback_rate =
+                          parseFloat(($event.target as HTMLInputElement).value) || 0
+                      "
+                      type="number"
+                      step="0.0001"
+                      min="0.01"
+                      max="1000"
+                      class="input"
+                      data-testid="payment-fx-fallback-rate"
+                    />
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.fxFallbackRateHint") }}
+                    </p>
+                  </div>
                   <div>
                     <label class="input-label">{{
                       t("admin.settings.payment.subscriptionUsdToCnyRate")
@@ -8866,6 +8947,11 @@ const form = reactive<SettingsForm>({
   payment_balance_recharge_multiplier: 1,
   payment_subscription_usd_to_cny_rate: 0,
   payment_recharge_fee_rate: 0,
+  // === v4.6.2 currency separation ===
+  payment_settlement_currency: "USD",
+  payment_recharge_currency: "CNY",
+  payment_fx_api_url: "",
+  payment_fx_fallback_rate: 6.8,
   payment_enabled_types: [],
   payment_help_image_url: "",
   payment_help_text: "",
