@@ -29,6 +29,15 @@ const (
 	// 0/未配置 = 关闭换算（订阅按 price 数值直付），显式配置后 CNY 通道订阅按 price × rate 收款。
 	SettingSubscriptionUSDToCNYRate      = "SUBSCRIPTION_USD_TO_CNY_RATE"
 	SettingRechargeFeeRate               = "RECHARGE_FEE_RATE"
+	// === v4.6.2 结算/充值币种分离（主人规范 2026-08-02）===
+	// SettlementCurrency: 充值后到账的余额单位（默认 USD）
+	// RechargeCurrency:   支付页面输入货币（默认 CNY）
+	// FXApiURL:           用户自定义汇率 API（留空=用 FXFallbackRate）
+	// FXFallbackRate:     固定汇率（CNY per USD，默认 6.8）
+	SettingSettlementCurrency = "PAYMENT_SETTLEMENT_CURRENCY"
+	SettingRechargeCurrency   = "PAYMENT_RECHARGE_CURRENCY"
+	SettingFXApiURL           = "PAYMENT_FX_API_URL"
+	SettingFXFallbackRate     = "PAYMENT_FX_FALLBACK_RATE"
 	SettingProductNamePrefix             = "PRODUCT_NAME_PREFIX"
 	SettingProductNameSuffix             = "PRODUCT_NAME_SUFFIX"
 	SettingHelpImageURL                  = "PAYMENT_HELP_IMAGE_URL"
@@ -46,6 +55,9 @@ const (
 const (
 	defaultOrderTimeoutMin  = 30
 	defaultMaxPendingOrders = 3
+
+	// === v4.6.2 currency separation (owner spec 2026-08-02) ===
+	defaultFXFallbackRate = 6.8 // CNY per USD 默认固定汇率
 )
 
 // PaymentConfig holds the payment system configuration.
@@ -62,6 +74,15 @@ type PaymentConfig struct {
 	// SubscriptionUSDToCNYRate 为 0 时订阅换算关闭（兼容存量行为）。
 	SubscriptionUSDToCNYRate float64 `json:"subscription_usd_to_cny_rate"`
 	RechargeFeeRate          float64 `json:"recharge_fee_rate"`
+	// === v4.6.2 结算/充值币种分离（主人规范 2026-08-02）===
+	// SettlementCurrency: 充值后到账的余额单位（默认 USD）
+	// RechargeCurrency:   支付页面输入货币（默认 CNY）
+	// FXApiURL:           用户自定义汇率 API（留空=用 FXFallbackRate）
+	// FXFallbackRate:     固定汇率（CNY per USD，默认 6.8）；跨币种时按此换算
+	SettlementCurrency string  `json:"settlement_currency"`
+	RechargeCurrency   string  `json:"recharge_currency"`
+	FXApiURL           string  `json:"fx_api_url"`
+	FXFallbackRate     float64 `json:"fx_fallback_rate"`
 	LoadBalanceStrategy      string  `json:"load_balance_strategy"`
 	ProductNamePrefix        string  `json:"product_name_prefix"`
 	ProductNameSuffix        string  `json:"product_name_suffix"`
@@ -95,6 +116,11 @@ type UpdatePaymentConfigRequest struct {
 	BalanceRechargeMultiplier *float64 `json:"balance_recharge_multiplier"`
 	SubscriptionUSDToCNYRate  *float64 `json:"subscription_usd_to_cny_rate"`
 	RechargeFeeRate           *float64 `json:"recharge_fee_rate"`
+	// === v4.6.2 结算/充值币种分离（主人规范 2026-08-02）===
+	SettlementCurrency *string  `json:"settlement_currency"`
+	RechargeCurrency   *string  `json:"recharge_currency"`
+	FXApiURL           *string  `json:"fx_api_url"`
+	FXFallbackRate     *float64 `json:"fx_fallback_rate"`
 	LoadBalanceStrategy       *string  `json:"load_balance_strategy"`
 	ProductNamePrefix         *string  `json:"product_name_prefix"`
 	ProductNameSuffix         *string  `json:"product_name_suffix"`
@@ -250,6 +276,11 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		BalanceRechargeMultiplier: normalizeBalanceRechargeMultiplier(pcParseFloat(vals[SettingBalanceRechargeMult], defaultBalanceRechargeMultiplier)),
 		SubscriptionUSDToCNYRate:  normalizeSubscriptionUSDToCNYRate(pcParseFloat(vals[SettingSubscriptionUSDToCNYRate], 0)),
 		RechargeFeeRate:           pcParseFloat(vals[SettingRechargeFeeRate], 0),
+		// v4.6.2 currency separation
+		SettlementCurrency: NormalizePaymentCurrency(vals[SettingSettlementCurrency], "USD"),
+		RechargeCurrency:   NormalizePaymentCurrency(vals[SettingRechargeCurrency], "CNY"),
+		FXApiURL:           strings.TrimSpace(vals[SettingFXApiURL]),
+		FXFallbackRate:     NormalizeFXFallbackRate(pcParseFloat(vals[SettingFXFallbackRate], defaultFXFallbackRate)),
 		LoadBalanceStrategy:       vals[SettingLoadBalanceStrategy],
 		ProductNamePrefix:         vals[SettingProductNamePrefix],
 		ProductNameSuffix:         vals[SettingProductNameSuffix],
@@ -376,6 +407,35 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	}
 	if req.RechargeFeeRate != nil {
 		m[SettingRechargeFeeRate] = formatNonNegativeFloat(req.RechargeFeeRate)
+	}
+	// === v4.6.2 currency separation ===
+	if req.SettlementCurrency != nil {
+		v := NormalizePaymentCurrency(*req.SettlementCurrency, "USD")
+		if v == "" {
+			return infraerrors.BadRequest("INVALID_SETTLEMENT_CURRENCY", "settlement currency must be one of USD/CNY/EUR")
+		}
+		m[SettingSettlementCurrency] = v
+	}
+	if req.RechargeCurrency != nil {
+		v := NormalizePaymentCurrency(*req.RechargeCurrency, "CNY")
+		if v == "" {
+			return infraerrors.BadRequest("INVALID_RECHARGE_CURRENCY", "recharge currency must be one of USD/CNY/EUR")
+		}
+		m[SettingRechargeCurrency] = v
+	}
+	if req.FXApiURL != nil {
+		v := strings.TrimSpace(*req.FXApiURL)
+		if v != "" && !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+			return infraerrors.BadRequest("INVALID_FX_API_URL", "fx api url must start with http:// or https://")
+		}
+		m[SettingFXApiURL] = v
+	}
+	if req.FXFallbackRate != nil {
+		v := *req.FXFallbackRate
+		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > 1000 {
+			return infraerrors.BadRequest("INVALID_FX_FALLBACK_RATE", "fx fallback rate must be > 0 and <= 1000 (CNY per USD)")
+		}
+		m[SettingFXFallbackRate] = formatPositiveFloatExact(req.FXFallbackRate)
 	}
 	if req.LoadBalanceStrategy != nil {
 		m[SettingLoadBalanceStrategy] = derefStr(req.LoadBalanceStrategy)
