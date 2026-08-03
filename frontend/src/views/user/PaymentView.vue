@@ -506,7 +506,9 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0,
+  settlement_currency: 'USD', recharge_currency: 'CNY', fx_fallback_rate: 6.8,
+  help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -531,7 +533,6 @@ const subscriptionUsdToCnyRate = computed(() => {
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
 // === v4.6.2 currency separation ===
 const settlementCurrency = computed(() => checkout.value?.settlement_currency || 'USD')
-const rechargeCurrency = computed(() => checkout.value?.recharge_currency || 'CNY')
 const fxFallbackRate = computed(() => checkout.value?.fx_fallback_rate || 6.8)
 // 是否跨币种（网关 CNY ≠ 结算 USD）：触发换算提示
 const isCrossCurrency = computed(() => {

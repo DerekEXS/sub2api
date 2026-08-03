@@ -7242,17 +7242,37 @@
                   </div>
                   <div>
                     <label class="input-label">{{
-                      t("admin.settings.payment.fxApiUrl")
+                      t("admin.settings.payment.fxApiUrls")
                     }}</label>
-                    <input
-                      v-model="form.payment_fx_api_url"
-                      type="url"
+                    <textarea
+                      :value="form.payment_fx_api_urls_text"
+                      @input="
+                        form.payment_fx_api_urls_text = (
+                          $event.target as HTMLTextAreaElement
+                        ).value
+                      "
+                      rows="2"
                       class="input"
                       :placeholder="t('admin.settings.payment.fxApiUrlPlaceholder')"
-                      data-testid="payment-fx-api-url"
-                    />
+                      data-testid="payment-fx-api-urls"
+                    ></textarea>
                     <p class="mt-0.5 text-xs text-gray-400">
-                      {{ t("admin.settings.payment.fxApiUrlHint") }}
+                      {{ t("admin.settings.payment.fxApiUrlsHint") }}
+                    </p>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline mt-2"
+                      :disabled="fxTestLoading"
+                      @click="testFXAPI"
+                    >
+                      {{ fxTestLoading ? t('admin.settings.payment.fxApiTesting') : t('admin.settings.payment.fxApiTest') }}
+                    </button>
+                    <p
+                      v-if="fxTestResult"
+                      class="mt-1 text-xs font-medium"
+                      :class="fxTestOk ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                    >
+                      {{ fxTestResult }}
                     </p>
                   </div>
                   <div>
@@ -8320,6 +8340,10 @@ const loadFailed = ref(false);
 const saving = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
+// === v4.6.2 currency separation: FX API 测试 ===
+const fxTestLoading = ref(false);
+const fxTestResult = ref("");
+const fxTestOk = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
 const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
@@ -8858,6 +8882,9 @@ type SettingsForm = Omit<
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
 > & {
+  // v4.6.2 currency separation: textarea 编辑态（多行 URL 回退链）
+  payment_fx_api_urls_text: string;
+  payment_fx_api_urls: string[];
   smtp_password: string;
   turnstile_secret_key: string;
   linuxdo_connect_client_secret: string;
@@ -8894,6 +8921,8 @@ type SettingsForm = Omit<
 };
 
 const form = reactive<SettingsForm>({
+  payment_fx_api_urls_text: "",
+  payment_fx_api_urls: [],
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
@@ -10056,6 +10085,12 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    // v4.6.2: FX API URLs 数组 → textarea 文本（回退链）
+    if (Array.isArray(form.payment_fx_api_urls) && form.payment_fx_api_urls.length) {
+      form.payment_fx_api_urls_text = form.payment_fx_api_urls.join("\n");
+    } else if (form.payment_fx_api_url) {
+      form.payment_fx_api_urls_text = form.payment_fx_api_url;
+    }
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
         defaultClaudeOAuthSystemPromptBlocks;
@@ -10627,6 +10662,15 @@ async function saveSettings() {
       payment_subscription_usd_to_cny_rate:
         Number(form.payment_subscription_usd_to_cny_rate) || 0,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
+      // === v4.6.2 currency separation ===
+      payment_settlement_currency: form.payment_settlement_currency || "USD",
+      payment_recharge_currency: form.payment_recharge_currency || "CNY",
+      payment_fx_api_url: (form.payment_fx_api_urls_text || "").split("\n")[0]?.trim() || "",
+      payment_fx_api_urls: (form.payment_fx_api_urls_text || "")
+        .split("\n")
+        .map((u) => u.trim())
+        .filter((u) => u.length > 0),
+      payment_fx_fallback_rate: Number(form.payment_fx_fallback_rate) || 6.8,
       payment_enabled_types: form.payment_enabled_types,
       payment_load_balance_strategy: form.payment_load_balance_strategy,
       payment_product_name_prefix: form.payment_product_name_prefix,
@@ -10867,6 +10911,42 @@ async function testSmtpConnection() {
     );
   } finally {
     testingSmtp.value = false;
+  }
+}
+
+// v4.6.2: 立即测试 FX API 地址
+async function testFXAPI() {
+  const url = (form.payment_fx_api_urls_text || "").split("\n")[0]?.trim();
+  if (!url) {
+    fxTestResult.value = t("admin.settings.payment.fxApiTestFailed", { error: "URL 为空" });
+    fxTestOk.value = false;
+    return;
+  }
+  fxTestLoading.value = true;
+  fxTestResult.value = "";
+  try {
+    const res = await adminAPI.settings.testFXAPI({ url });
+    if (res.ok && res.rate_usd_cny) {
+      fxTestOk.value = true;
+      fxTestResult.value = t("admin.settings.payment.fxApiTestSuccess", {
+        base: res.base || "USD",
+        quote: "CNY",
+        rate: res.rate_usd_cny.toFixed(4),
+        ms: res.latency_ms ?? 0,
+      });
+    } else {
+      fxTestOk.value = false;
+      fxTestResult.value = t("admin.settings.payment.fxApiTestFailed", {
+        error: res.message || "未知错误",
+      });
+    }
+  } catch (e: any) {
+    fxTestOk.value = false;
+    fxTestResult.value = t("admin.settings.payment.fxApiTestFailed", {
+      error: e?.message || String(e),
+    });
+  } finally {
+    fxTestLoading.value = false;
   }
 }
 

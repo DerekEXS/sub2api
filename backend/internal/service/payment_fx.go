@@ -206,6 +206,15 @@ func normalizeRate(base, from, to string, rateFromBaseToUSD float64) float64 {
 	return 0
 }
 
+// TestFetchAPI 公开测试单条汇率 API（v4.6.2 task 3，"立即获取汇率"按钮用）。
+// 返回 (1 base = ? USD, base, ok)；不写缓存、不降级。
+func (s *FXService) TestFetchAPI(url string) (float64, string, bool) {
+	if s == nil {
+		return 0, "", false
+	}
+	return s.fetchAPI(context.Background(), url)
+}
+
 // fetchAPI 拉取汇率 API。返回 (1 base = ? USD 当 base=USD 时, base, ok)。
 // 实际：从 GET {apiURL} 拿 JSON，找 "rates" map，返回 rates["USD"]（假设 base=USD）。
 // 我们的 GetRate 调用时 base 应为 "USD"，否则不命中。
@@ -241,11 +250,16 @@ func (s *FXService) fetchAPI(ctx context.Context, apiURL string) (float64, strin
 	if payload.Base == "" {
 		payload.Base = "USD"
 	}
-	usdRate, ok := payload.Rates["USD"]
-	if !ok || usdRate <= 0 {
+	// 返回 base→CNY 的汇率（前端展示用）；无 CNY 时用 USD 兜底（=1）。
+	usdRate, okUSD := payload.Rates["USD"]
+	if !okUSD || usdRate <= 0 {
 		return 0, payload.Base, false
 	}
-	return usdRate, payload.Base, true
+	cnyRate, okCNY := payload.Rates["CNY"]
+	if !okCNY || cnyRate <= 0 {
+		cnyRate = 1
+	}
+	return cnyRate, payload.Base, true
 }
 
 // fallbackCrossViaUSD 用 fallback（CNY per USD）做 from→to 的中转换算。

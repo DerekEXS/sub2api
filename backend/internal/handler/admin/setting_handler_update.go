@@ -293,6 +293,7 @@ type UpdateSettingsRequest struct {
 	PaymentSettlementCurrency *string  `json:"payment_settlement_currency"`
 	PaymentRechargeCurrency   *string  `json:"payment_recharge_currency"`
 	PaymentFXApiURL           *string  `json:"payment_fx_api_url"`
+	PaymentFXApiURLs          []string `json:"payment_fx_api_urls"`
 	PaymentFXFallbackRate     *float64 `json:"payment_fx_fallback_rate"`
 	PaymentLoadBalanceStrat   *string  `json:"payment_load_balance_strategy"`
 	PaymentProductNamePrefix         *string  `json:"payment_product_name_prefix"`
@@ -1830,6 +1831,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			SettlementCurrency: req.PaymentSettlementCurrency,
 			RechargeCurrency:   req.PaymentRechargeCurrency,
 			FXApiURL:           req.PaymentFXApiURL,
+			FXApiURLs:          req.PaymentFXApiURLs,
 			FXFallbackRate:     req.PaymentFXFallbackRate,
 			LoadBalanceStrategy:           req.PaymentLoadBalanceStrat,
 			ProductNamePrefix:             req.PaymentProductNamePrefix,
@@ -2095,6 +2097,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentSettlementCurrency:                              updatedPaymentCfg.SettlementCurrency,
 		PaymentRechargeCurrency:                                updatedPaymentCfg.RechargeCurrency,
 		PaymentFXApiURL:                                        updatedPaymentCfg.FXApiURL,
+		PaymentFXApiURLs:                                       updatedPaymentCfg.FXApiURLs,
 		PaymentFXFallbackRate:                                  updatedPaymentCfg.FXFallbackRate,
 		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
 		PaymentProductNamePrefix:                               updatedPaymentCfg.ProductNamePrefix,
@@ -2161,7 +2164,7 @@ func hasPaymentFields(req UpdateSettingsRequest) bool {
 		req.PaymentBalanceRechargeMultiplier != nil || req.PaymentSubscriptionUSDToCNYRate != nil ||
 		req.PaymentRechargeFeeRate != nil ||
 		req.PaymentSettlementCurrency != nil || req.PaymentRechargeCurrency != nil ||
-		req.PaymentFXApiURL != nil || req.PaymentFXFallbackRate != nil ||
+		req.PaymentFXApiURL != nil || req.PaymentFXApiURLs != nil || req.PaymentFXFallbackRate != nil ||
 		req.PaymentLoadBalanceStrat != nil || req.PaymentProductNamePrefix != nil ||
 		req.PaymentProductNameSuffix != nil || req.PaymentHelpImageURL != nil ||
 		req.PaymentHelpText != nil || req.PaymentCancelRateLimitEnabled != nil ||

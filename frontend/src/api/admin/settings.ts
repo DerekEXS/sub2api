@@ -899,6 +899,7 @@ export interface UpdateSettingsRequest {
   payment_settlement_currency?: string;
   payment_recharge_currency?: string;
   payment_fx_api_url?: string;
+  payment_fx_api_urls?: string[];
   payment_fx_fallback_rate?: number;
   payment_load_balance_strategy?: string;
   payment_product_name_prefix?: string;
@@ -1008,6 +1009,22 @@ export async function testSmtpConnection(
     "/admin/settings/test-smtp",
     config,
   );
+  return data;
+}
+
+/**
+ * Test FX API URL (v4.6.2 currency separation)
+ * @param url - FX API URL to test
+ * @returns { ok, base, rate_usd_cny, latency_ms }
+ */
+export interface TestFXAPIRequest {
+  url: string;
+  fallback_rate?: number;
+}
+export async function testFXAPI(
+  req: TestFXAPIRequest,
+): Promise<{ ok: boolean; base?: string; rate_usd_cny?: number; latency_ms?: number; message?: string }> {
+  const { data } = await apiClient.post("/admin/settings/test-fx", req);
   return data;
 }
 
@@ -1479,6 +1496,7 @@ export const settingsAPI = {
   getSettings,
   updateSettings,
   testSmtpConnection,
+  testFXAPI,
   sendTestEmail,
   getEmailTemplates,
   getEmailTemplate,
