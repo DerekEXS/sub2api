@@ -79,7 +79,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	// fxRate: 结算货币 → 渠道货币 的汇率（如 USD→CNY=7），仅跨币种时有值
 	var fxRate float64
 	if s.fxService != nil {
-		fxRate = s.fxService.GetRate(ctx, settlementCurrency, methodCurrency, cfg.FXApiURL, cfg.FXFallbackRate)
+		fxRate = s.fxService.GetRate(ctx, settlementCurrency, methodCurrency, fxAPICandidates(cfg), cfg.FXFallbackRate)
 	}
 	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, methodCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate, fxRate, settlementCurrency)
 	if err != nil {
@@ -99,7 +99,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if selectedCurrency != methodCurrency {
 		// 按选中实例的真实币种重算 fxRate + payAmount（v4.6.2）
 		if s.fxService != nil {
-			fxRate = s.fxService.GetRate(ctx, settlementCurrency, selectedCurrency, cfg.FXApiURL, cfg.FXFallbackRate)
+			fxRate = s.fxService.GetRate(ctx, settlementCurrency, selectedCurrency, fxAPICandidates(cfg), cfg.FXFallbackRate)
 		}
 		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate, fxRate, settlementCurrency)
 		if err != nil {
@@ -669,6 +669,20 @@ func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, cur
 		paymentAmount = calculateBalanceGatewayBaseAmount(limitAmount, fxRate, currency, settlementCurrency)
 	}
 	return calculateCreateOrderPayAmount(paymentAmount, feeRate, currency)
+}
+
+// fxAPICandidates 返回 FX API URL 候选列表（v4.6.2）：多 URL 回退链优先，单 URL 兼容。
+func fxAPICandidates(cfg *PaymentConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	if len(cfg.FXApiURLs) > 0 {
+		return cfg.FXApiURLs
+	}
+	if strings.TrimSpace(cfg.FXApiURL) != "" {
+		return []string{cfg.FXApiURL}
+	}
+	return nil
 }
 
 // calculateBalanceGatewayBaseAmount 计算余额充值订单的网关扣款基数（v4.6.2）。

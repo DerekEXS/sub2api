@@ -112,11 +112,11 @@ func cacheKey(from, to string) string {
 // GetRate 返回 1 from = ? to 的汇率。
 //   - from == to 时直接返 1
 //   - 命中缓存（未过期）→ 返缓存值
-//   - 用户配了 FX API URL → HTTP 拉取（含跨 base 归一化）→ 缓存
-//   - 拉取失败/未配 → 用 fallbackRate（settings.FXFallbackRate）
+//   - 用户配了 FX API URL（可多条回退链）→ 逐个 HTTP 拉取，用 rates[to]/rates[from] 数学换算（与 base 无关）
+//   - 全部拉取失败/未配 → 用 fallbackRate（settings.FXFallbackRate，CNY per USD）做 USD 中转
 //
-// 参数 fallbackRate 期望为 CNY per USD（如 6.8）；当 from/to 涉及非 USD/CNY 时按 USD 中转换算。
-func (s *FXService) GetRate(ctx context.Context, from, to, apiURL string, fallbackRate float64) float64 {
+// 优先级（主人 2026-08-02 规范）：API 汇率优先，固定汇率兜底。
+func (s *FXService) GetRate(ctx context.Context, from, to string, apiURLs []string, fallbackRate float64) float64 {
 	from = strings.ToUpper(strings.TrimSpace(from))
 	to = strings.ToUpper(strings.TrimSpace(to))
 	if from == "" || to == "" {
@@ -138,128 +138,110 @@ func (s *FXService) GetRate(ctx context.Context, from, to, apiURL string, fallba
 		return entry.Rate
 	}
 
-	// 尝试拉取
-	if strings.TrimSpace(apiURL) != "" {
-		if rate, base, ok := s.fetchAPI(ctx, apiURL); ok {
-			// 跨 base 归一化：用户 API 可能 base=USD/CNY/EUR，需换算为 from→to
-			rate = normalizeRate(base, from, to, rate)
-			if rate > 0 {
-				s.mu.Lock()
-				s.cache.Entries[key] = fxCacheEntry{
-					FromCurrency: from, ToCurrency: to, Rate: rate,
-					BaseCurrency: base, FetchedAt: now, SuccessCount: entry.SuccessCount + 1,
-				}
-				s.consecutiveFail = 0
-				s.mu.Unlock()
-				s.saveCache()
-				return rate
-			}
-		} else {
+	// 尝试拉取（多 URL 回退链：逐个试，第一个成功的生效）
+	urls := make([]string, 0, len(apiURLs))
+	for _, u := range apiURLs {
+		v := strings.TrimSpace(u)
+		if v != "" {
+			urls = append(urls, v)
+		}
+	}
+	for _, url := range urls {
+		rates, base, ok := s.fetchAPI(ctx, url)
+		if !ok {
 			s.mu.Lock()
 			s.consecutiveFail++
 			s.mu.Unlock()
 			if s.log != nil {
-				s.log.Warn("fx api fetch failed", zap.String("url", apiURL), zap.Int("consecutive_fail", s.consecutiveFail))
+				s.log.Warn("fx api fetch failed", zap.String("url", url), zap.Int("consecutive_fail", s.consecutiveFail))
 			}
+			continue
 		}
+		// 数学换算：rate = rates[to] / rates[from]（与 API 的 base 无关）
+		rFrom, okFrom := rates[from]
+		rTo, okTo := rates[to]
+		if !okFrom || !okTo || rFrom <= 0 || rTo <= 0 {
+			if s.log != nil {
+				s.log.Warn("fx api missing pair", zap.String("from", from), zap.String("to", to), zap.String("url", url))
+			}
+			continue
+		}
+		rate := rTo / rFrom
+		if rate <= 0 {
+			continue
+		}
+		s.mu.Lock()
+		s.cache.Entries[key] = fxCacheEntry{
+			FromCurrency: from, ToCurrency: to, Rate: rate,
+			BaseCurrency: base, FetchedAt: now, SuccessCount: entry.SuccessCount + 1,
+		}
+		s.consecutiveFail = 0
+		s.mu.Unlock()
+		s.saveCache()
+		return rate
 	}
 
 	// 兜底：用 settings.FXFallbackRate（CNY per USD）做 USD 中转
 	return fallbackCrossViaUSD(from, to, fallbackRate)
 }
 
-// normalizeRate 假设 API 返回的 raw rate 是 1 base = rate USD，把 from→to 的最终汇率算出来。
-// 如果 from/to 中有一个等于 base，可以直接用；否则需要 USD 中转。
-// 简化策略：要求用户的 FX API base=USD；如非 USD，则把 raw rate 视为 1 base = rate USD 等价值。
-func normalizeRate(base, from, to string, rateFromBaseToUSD float64) float64 {
-	// 我们约定：rateFromBaseToUSD = "1 base = ? USD"（FX_API 返回的是 1 base = X USD）
-	// 但 exchangerate-api.com / open.er-api.com 返回的是 1 base = X target
-	// 实际接口约定：GET https://api.exchangerate-api.com/v4/latest/USD
-	//   返回 rates: { "USD": 1.0, "CNY": 6.78, "EUR": 0.92 }
-	//   即 1 USD = rates["CNY"] CNY
-	// 所以 rateFromBaseToUSD 实际是 base→USD 的反向意义，但我们只关心跨币种换算，
-	// 最终用户调用 GetRate(from, to) 时需要的是 1 from = ? to
-	// 简化处理：假定 base=USD（绝大多数汇率 API），rateFromBaseToUSD 就是 1 USD = ? CNY 之类
-	// 因此：1 from = (1 USD / rateFromBaseToUSD[from]) * rateFromBaseToUSD[to]（从 base=USD 推导）
-	if base == "" || from == "" || to == "" || rateFromBaseToUSD <= 0 {
-		return 0
-	}
-	// 我们把 rate 视为 "1 base = ? USD"——所以 1 USD = 1 / rate from-base
-	// 1 from = ? USD = (1 from in base) * (1 base in USD)
-	// 但实际 open.er-api.com 的语义是：rates["XXX"] 表示 1 base = XXX target
-	// 也就是说 rateFromBaseToUSD 应该理解为 "1 base = X target where target=USD" = X
-	// 那么 1 USD = (1 / X) base = 1 base
-	// 1 from = ? target = rates[target]（基于 base）/ rates[from]（基于 base）
-	// = rate[target] / rate[from]
-	//
-	// 由于我们的 rateFromBaseToUSD 是固定的 from-base-to-usd 字段名误导，实际：
-	// 调用方应传入完整 rates map；这里我们假设 GetRate 实际传入的是 1 base = ? target 中的 ? target=USD
-	// 简化实现：直接返 rateFromBaseToUSD，假设 base=USD 且 from=USD
-	// 对于 from≠base 或 to≠base 的情况，调用方应该传入不同 base 的 API 调用或我们改进接口
-	if strings.EqualFold(from, base) {
-		// 1 from = rateFromBaseToUSD USD
-		// 1 USD = 1/rateFromBaseToUSD from
-		// 1 from = ? to = rateFromBaseToUSD * (1 USD = ? to) → 但我们没 to 的汇率
-		// 所以这个 helper 不够用；改为由 GetRate 内部直接调用 fetchAndParse 拿完整 rates
-		return rateFromBaseToUSD
-	}
-	return 0
-}
-
 // TestFetchAPI 公开测试单条汇率 API（v4.6.2 task 3，"立即获取汇率"按钮用）。
-// 返回 (1 base = ? USD, base, ok)；不写缓存、不降级。
+// 返回 (1 USD = ? CNY, base, ok)；不写缓存、不降级。
 func (s *FXService) TestFetchAPI(url string) (float64, string, bool) {
 	if s == nil {
 		return 0, "", false
 	}
-	return s.fetchAPI(context.Background(), url)
+	rates, base, ok := s.fetchAPI(context.Background(), url)
+	if !ok {
+		return 0, base, false
+	}
+	usd, okUSD := rates["USD"]
+	cny, okCNY := rates["CNY"]
+	if !okUSD || usd <= 0 || !okCNY || cny <= 0 {
+		return 0, base, false
+	}
+	return cny / usd, base, true
 }
 
-// fetchAPI 拉取汇率 API。返回 (1 base = ? USD 当 base=USD 时, base, ok)。
-// 实际：从 GET {apiURL} 拿 JSON，找 "rates" map，返回 rates["USD"]（假设 base=USD）。
-// 我们的 GetRate 调用时 base 应为 "USD"，否则不命中。
-func (s *FXService) fetchAPI(ctx context.Context, apiURL string) (float64, string, bool) {
+// fetchAPI 拉取汇率 API，返回完整 rates map + base。
+// 实际：从 GET {apiURL} 拿 JSON，解析 "rates" map（key=币种, value=1 base = X target）。
+// base 缺失时按 "USD" 处理。调用方用 rates[to]/rates[from] 数学换算（与 base 无关）。
+func (s *FXService) fetchAPI(ctx context.Context, apiURL string) (map[string]float64, string, bool) {
 	if !strings.HasPrefix(apiURL, "http://") && !strings.HasPrefix(apiURL, "https://") {
-		return 0, "", false
+		return nil, "", false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
-		return 0, "", false
+		return nil, "", false
 	}
 	req.Header.Set("User-Agent", "Sub2API/4.6.2 (+fx)")
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return 0, "", false
+		return nil, "", false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return 0, "", false
+		return nil, "", false
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return 0, "", false
+		return nil, "", false
 	}
 	var payload struct {
 		Base  string             `json:"base"`
 		Rates map[string]float64 `json:"rates"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return 0, "", false
+		return nil, "", false
 	}
 	if payload.Base == "" {
 		payload.Base = "USD"
 	}
-	// 返回 base→CNY 的汇率（前端展示用）；无 CNY 时用 USD 兜底（=1）。
-	usdRate, okUSD := payload.Rates["USD"]
-	if !okUSD || usdRate <= 0 {
-		return 0, payload.Base, false
+	if len(payload.Rates) == 0 {
+		return nil, payload.Base, false
 	}
-	cnyRate, okCNY := payload.Rates["CNY"]
-	if !okCNY || cnyRate <= 0 {
-		cnyRate = 1
-	}
-	return cnyRate, payload.Base, true
+	return payload.Rates, payload.Base, true
 }
 
 // fallbackCrossViaUSD 用 fallback（CNY per USD）做 from→to 的中转换算。
