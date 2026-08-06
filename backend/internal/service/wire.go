@@ -874,6 +874,9 @@ func ProvideBalanceNotifyService(emailService *EmailService, settingRepo Setting
 func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService, notificationEmailService *NotificationEmailService) *PaymentService {
 	svc := NewPaymentService(entClient, registry, loadBalancer, redeemService, subscriptionSvc, configService, userRepo, groupRepo, affiliateService)
 	svc.SetNotificationEmailService(notificationEmailService)
+	// v4.6.2 currency separation: 注入 FX 服务（wire 暂未暴露 logger 入参，传入 nil 由 FXService 自取 slog）
+	// 注意：放在 ProvidePaymentService 内（而非 wire_gen.go 手工行），避免 merge upstream 后重跑 wire 丢失注入
+	svc.SetFXService(NewFXService(nil))
 	return svc
 }
 
