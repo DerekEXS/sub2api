@@ -739,22 +739,33 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 		if m, ok := s.modelsDev.Lookup(lookupCandidates[0]); ok {
 			return ModelsDevModelPricing(m)
 		}
+		// 6.1 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
+		if main, ok := resolveBranchToMainModel(branchModelCandidates(lookupCandidates[0]),
+			func(c string) bool {
+				_, ok := s.modelsDev.Lookup(c)
+				return ok
+			}); ok {
+			if m, ok2 := s.modelsDev.Lookup(main); ok2 {
+				return ModelsDevModelPricing(m)
+			}
+		}
 	}
 
 	return nil
 }
 
-// GetModelMetadata 查询模型元数据（context_length / modalities），供模型广场展示。
+// GetModelMetadata 查询模型元数据（context_length / max_output / modalities），供模型广场展示。
 // 数据源：models.dev。返回零值表示无元数据。
-func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, modalities []string) {
+func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, maxOutput int64, modalities []string) {
 	if s == nil || s.modelsDev == nil || modelName == "" {
-		return 0, nil
+		return 0, 0, nil
 	}
 	m, ok := s.modelsDev.Lookup(modelName)
 	if !ok {
-		return 0, nil
+		return 0, 0, nil
 	}
 	contextLen = m.Limit.Context
+	maxOutput = m.Limit.Output
 	seen := make(map[string]struct{})
 	for _, mods := range [][]string{m.Modalities.Input, m.Modalities.Output} {
 		for _, mod := range mods {
@@ -768,7 +779,82 @@ func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, m
 			modalities = append(modalities, mod)
 		}
 	}
-	return contextLen, modalities
+	return contextLen, maxOutput, modalities
+}
+
+// branchModelCandidates 分支模型剥离候选（最长优先，逐级生成）。
+// 分支/非官方模型名（gpt-5.6-terra-openai-compact / gpt-5.2-chat-latest /
+// gpt-5.2-2025-12-11）逐级剥离后缀，引导到主模型获取价格。
+// 只做结构剥离，是否有效由调用方用「价格库存在」校验（避免误匹配）。
+func branchModelCandidates(model string) []string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	var out []string
+	// 1. 去日期后缀 -2025-12-11
+	if idx := len(lower) - len("2000-01-01"); idx > 0 {
+		if r := regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`); r.MatchString(lower) {
+			out = append(out, r.ReplaceAllString(lower, ""))
+		}
+	}
+	// 2. 去 8 位日期后缀 -20251211
+	if r := regexp.MustCompile(`-\d{8}$`); r.MatchString(lower) {
+		out = append(out, r.ReplaceAllString(lower, ""))
+	}
+	// 3. 逐段剥离最后一个 - 段（gpt-5.6-terra-openai-compact -> gpt-5.6-terra-openai -> gpt-5.6-terra -> gpt-5.6）
+	cur := lower
+	for {
+		idx := strings.LastIndex(cur, "-")
+		if idx <= 0 {
+			break
+		}
+		cur = cur[:idx]
+		out = append(out, cur)
+	}
+	return out
+}
+
+// resolveBranchToMainModel 分支模型引导：在指定价格库中查找主模型。
+// 校验「候选主模型在库中存在」，存在才返回（避免误匹配到不相干模型）。
+func resolveBranchToMainModel(candidates []string, lookup func(string) bool) (string, bool) {
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if lookup(c) {
+			return c, true
+		}
+	}
+	return "", false
+}
+
+// GetOfficialPricingPreferModelsDev 官方价格获取（plaza 展示用，fork 新增）。
+// 回退链（用户 2026-08-08 规范）：
+//   1. models.dev 精确匹配（实时官方价）
+//   2. models.dev 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
+//   3. SUB2API 官方（LiteLLM 主文件 + fallback，含现有变体/家族回退与分支引导）
+// models.dev 获取失败（同步失败/无数据）时自然回退到 SUB2API 官方。
+func (s *PricingService) GetOfficialPricingPreferModelsDev(modelName string) *LiteLLMModelPricing {
+	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if modelLower == "" {
+		return nil
+	}
+	// 1. models.dev 精确
+	if s.modelsDev != nil {
+		if m, ok := s.modelsDev.Lookup(modelLower); ok {
+			return ModelsDevModelPricing(m)
+		}
+		// 2. models.dev 分支引导
+		if main, ok := resolveBranchToMainModel(branchModelCandidates(modelLower),
+			func(c string) bool {
+				_, ok := s.modelsDev.Lookup(c)
+				return ok
+			}); ok {
+			if m, ok2 := s.modelsDev.Lookup(main); ok2 {
+				return ModelsDevModelPricing(m)
+			}
+		}
+	}
+	// 3. SUB2API 官方（现有链 + 分支引导）
+	return s.GetModelPricing(modelName)
 }
 
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {
