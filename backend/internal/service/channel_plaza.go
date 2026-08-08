@@ -23,6 +23,9 @@ type PlazaModel struct {
 	Platform        string
 	Pricing         *ChannelModelPricing
 	OfficialPricing *PlazaOfficialPricing
+	// 模型元数据（fork 新增：来源 models.dev，供广场展示 context/模态）
+	ContextLength int64
+	Modalities    []string
 }
 
 // PlazaGroup 模型广场中以分组为顶层的条目。
@@ -144,11 +147,16 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 					continue
 				}
 				idx[key] = len(pg.Models)
-				pg.Models = append(pg.Models, PlazaModel{
+				pm := PlazaModel{
 					Name:     m.Name,
 					Platform: m.Platform,
 					Pricing:  pricing,
-				})
+				}
+				// 模型元数据（fork 新增：models.dev context/模态）
+				if s.pricingService != nil {
+					pm.ContextLength, pm.Modalities = s.pricingService.GetModelMetadata(m.Name)
+				}
+				pg.Models = append(pg.Models, pm)
 			}
 		}
 	}
