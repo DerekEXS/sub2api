@@ -23,8 +23,9 @@ type PlazaModel struct {
 	Platform        string
 	Pricing         *ChannelModelPricing
 	OfficialPricing *PlazaOfficialPricing
-	// 模型元数据（fork 新增：来源 models.dev，供广场展示 context/模态）
+	// 模型元数据（fork 新增：来源 models.dev，供广场展示 context/最大输出/模态）
 	ContextLength int64
+	MaxOutput     int64
 	Modalities    []string
 }
 
@@ -152,9 +153,9 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 					Platform: m.Platform,
 					Pricing:  pricing,
 				}
-				// 模型元数据（fork 新增：models.dev context/模态）
+				// 模型元数据（fork 新增：models.dev context/最大输出/模态）
 				if s.pricingService != nil {
-					pm.ContextLength, pm.Modalities = s.pricingService.GetModelMetadata(m.Name)
+					pm.ContextLength, pm.MaxOutput, pm.Modalities = s.pricingService.GetModelMetadata(m.Name)
 				}
 				pg.Models = append(pg.Models, pm)
 			}
@@ -246,7 +247,8 @@ func (s *ChannelService) lookupOfficialPricing(modelName string, memo map[string
 		return cached
 	}
 	var result *PlazaOfficialPricing
-	if lp := s.pricingService.GetModelPricing(modelName); lp != nil && !lp.TokenPricingAbsent {
+	// 官方价格回退链（用户 2026-08-08 规范）：models.dev 优先，失败回退 SUB2API 官方
+	if lp := s.pricingService.GetOfficialPricingPreferModelsDev(modelName); lp != nil && !lp.TokenPricingAbsent {
 		result = &PlazaOfficialPricing{
 			InputPrice:        nonZeroPtr(lp.InputCostPerToken),
 			OutputPrice:       nonZeroPtr(lp.OutputCostPerToken),

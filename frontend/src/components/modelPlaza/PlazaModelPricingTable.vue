@@ -2,14 +2,15 @@
   <div class="plaza-pricing-table overflow-x-auto" :style="accentStyle">
     <table class="w-full min-w-[860px] table-fixed border-collapse text-sm tabular-nums">
       <colgroup>
-        <col class="w-[22%]" />
+        <col class="w-[18%]" />
         <col class="w-[10%]" />
         <col class="w-[10%]" />
-        <col class="w-[14%]" />
         <col class="w-[10%]" />
         <col class="w-[10%]" />
-        <col class="w-[14%]" />
         <col class="w-[10%]" />
+        <col class="w-[10%]" />
+        <col class="w-[10%]" />
+        <col class="w-[12%]" />
       </colgroup>
       <thead>
         <tr
@@ -20,6 +21,18 @@
             class="border-r border-gray-100 py-2.5 pl-5 pr-4 text-left align-middle dark:border-dark-700/60"
           >
             {{ t('modelPlaza.table.model') }}
+          </th>
+          <th
+            rowspan="2"
+            class="border-r border-gray-100 py-2.5 px-3 text-left align-middle dark:border-dark-700/60"
+          >
+            {{ t('modelPlaza.table.params') }}
+          </th>
+          <th
+            rowspan="2"
+            class="border-r border-gray-100 py-2.5 px-3 text-left align-middle dark:border-dark-700/60"
+          >
+            {{ t('modelPlaza.table.modal') }}
           </th>
           <th colspan="3" class="pz-bg pt-2 text-center">
             <div class="pz-title border-b pb-2 font-semibold">
@@ -35,12 +48,6 @@
               {{ t('modelPlaza.table.officialPrice') }}
               <span class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
-          </th>
-          <th
-            rowspan="2"
-            class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle dark:border-dark-700/60"
-          >
-            {{ t('modelPlaza.table.rate') }}
           </th>
         </tr>
         <tr
@@ -81,21 +88,42 @@
               >
                 {{ billingModeLabel(m) }}
               </span>
-              <!-- 模型元数据徽章（fork 新增：context / 模态，来源 models.dev） -->
+            </div>
+          </td>
+
+          <!-- 参数列：上=最大输出 下=上下文（fork 新增，models.dev） -->
+          <td
+            class="border-r border-gray-100 px-3 py-2.5 align-middle dark:border-dark-700/60"
+          >
+            <div class="flex flex-col gap-0.5 font-mono text-xs leading-5 text-gray-700 dark:text-dark-200">
+              <div class="whitespace-nowrap">
+                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.maxOutput') }}</span>
+                <template v-if="(m.max_output ?? 0) > 0">{{ fmtContext(m.max_output ?? 0) }}</template>
+                <template v-else class="text-gray-300 dark:text-dark-600">-</template>
+              </div>
+              <div class="whitespace-nowrap">
+                <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.context') }}</span>
+                <template v-if="(m.context_length ?? 0) > 0">{{ fmtContext(m.context_length ?? 0) }}</template>
+                <template v-else>-</template>
+              </div>
+            </div>
+          </td>
+
+          <!-- 模态列：图形小标记（fork 新增，models.dev） -->
+          <td
+            class="border-r border-gray-100 px-3 py-2.5 align-middle dark:border-dark-700/60"
+          >
+            <div v-if="m.modalities?.length" class="flex flex-wrap gap-1">
               <span
-                v-if="(m.context_length ?? 0) > 0"
-                class="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-                :title="`${(m.context_length ?? 0).toLocaleString()} tokens`"
+                v-for="mod in m.modalities"
+                :key="mod"
+                :title="mod"
+                class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-100 text-sm leading-none dark:bg-dark-700/70"
               >
-                {{ fmtContext(m.context_length ?? 0) }}
-              </span>
-              <span
-                v-if="m.modalities?.length"
-                class="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-dark-700/70 dark:text-dark-300"
-              >
-                {{ m.modalities.join('/') }}
+                {{ modalityIcon(mod) }}
               </span>
             </div>
+            <span v-else class="text-gray-300 dark:text-dark-600">-</span>
           </td>
 
           <!-- token 计费:输入 / 输出(阶梯内联)/ 缓存(写/读) -->
@@ -200,22 +228,6 @@
             </div>
             <span v-else class="text-gray-400 dark:text-dark-500">-</span>
           </td>
-
-          <!-- 折扣倍率(生图独立倍率行展示独立倍率;专属倍率划线展示原倍率) -->
-          <td
-            class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle font-mono text-xs dark:border-dark-700/60"
-          >
-            <span
-              v-if="usesIndependentImageRate(m)"
-              class="font-bold text-gray-700 dark:text-gray-300"
-              >{{ requestRate(m) }}x</span
-            >
-            <template v-else-if="hasCustomRate">
-              <span class="mr-1 text-gray-400 line-through dark:text-dark-500">{{ rateMultiplier }}x</span>
-              <span class="font-bold text-primary-600 dark:text-primary-400">{{ effectiveRate }}x</span>
-            </template>
-            <span v-else class="font-bold text-gray-700 dark:text-gray-300">{{ effectiveRate }}x</span>
-          </td>
         </tr>
       </tbody>
     </table>
@@ -276,9 +288,6 @@ const sortedModels = computed(() => {
 })
 
 const effectiveRate = computed(() => props.userRateMultiplier ?? props.rateMultiplier)
-const hasCustomRate = computed(
-  () => props.userRateMultiplier != null && props.userRateMultiplier !== props.rateMultiplier
-)
 
 function billingMode(m: PlazaModel): BillingMode {
   return (m.pricing?.billing_mode || BILLING_MODE_TOKEN) as BillingMode
@@ -298,6 +307,18 @@ function fmtContext(n: number): string {
   }
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`
   return `${n}`
+}
+
+/** 模态图形标记（fork 新增，models.dev 风格小图标） */
+const MODALITY_ICONS: Record<string, string> = {
+  text: '📝',
+  image: '🖼️',
+  video: '🎬',
+  audio: '🎵',
+  pdf: '📄'
+}
+function modalityIcon(mod: string): string {
+  return MODALITY_ICONS[mod] ?? mod.charAt(0).toUpperCase()
 }
 
 /** 价格统一保底 2 位小数,更长的有效小数原样保留。 */
