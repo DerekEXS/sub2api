@@ -755,12 +755,23 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 }
 
 // GetModelMetadata 查询模型元数据（context_length / max_output / modalities），供模型广场展示。
-// 数据源：models.dev。返回零值表示无元数据。
+// 数据源：models.dev。精确未命中时走分支模型引导（gpt-5.6-terra-openai-compact ->
+// gpt-5.6-terra，复制原模型参数/模态）。返回零值表示无元数据。
 func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, maxOutput int64, modalities []string) {
 	if s == nil || s.modelsDev == nil || modelName == "" {
 		return 0, 0, nil
 	}
 	m, ok := s.modelsDev.Lookup(modelName)
+	if !ok {
+		// 分支模型引导：gpt-5.6-terra-openai-compact -> gpt-5.6-terra -> gpt-5.6
+		if main, ok2 := resolveBranchToMainModel(branchModelCandidates(modelName),
+			func(c string) bool {
+				_, ok3 := s.modelsDev.Lookup(c)
+				return ok3
+			}); ok2 {
+			m, ok = s.modelsDev.Lookup(main)
+		}
+	}
 	if !ok {
 		return 0, 0, nil
 	}
