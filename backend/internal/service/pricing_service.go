@@ -793,22 +793,47 @@ func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, m
 	return contextLen, maxOutput, modalities
 }
 
+// branchAliasMap 已知裸名/别名 → 主模型映射（models.dev 未收录裸名的场景，
+// 2026-08-08 GROK 修复补充）。命中后直接作为主模型候选。
+var branchAliasMap = map[string]string{
+	"grok":               "grok-4.5",       // 裸 grok = grok-4.5（xAI 官方 bare ID）
+	"grok-build":         "grok-build-0.1", // models.dev 只收录带版本号条目
+	"grok-build-latest":  "grok-build-0.1",
+	"grok-4.20":          "grok-4-20",      // 点/连字符命名差异（models.dev 用 grok-4-20）
+	"grok-4.20-fast":     "grok-4-20",      // fast 变体引导到基础版
+	"grok-4.20-reasoning": "grok-4-20",
+	"grok-4.20-non-reasoning": "grok-4-20",
+}
+
 // branchModelCandidates 分支模型剥离候选（最长优先，逐级生成）。
 // 分支/非官方模型名（gpt-5.6-terra-openai-compact / gpt-5.2-chat-latest /
-// gpt-5.2-2025-12-11）逐级剥离后缀，引导到主模型获取价格。
+// gpt-5.2-2025-12-11 / grok-4.20-fast）逐级剥离后缀，引导到主模型获取价格。
 // 只做结构剥离，是否有效由调用方用「价格库存在」校验（避免误匹配）。
 func branchModelCandidates(model string) []string {
 	lower := strings.ToLower(strings.TrimSpace(model))
+	seen := make(map[string]struct{})
 	var out []string
-	// 1. 去日期后缀 -2025-12-11
-	if idx := len(lower) - len("2000-01-01"); idx > 0 {
-		if r := regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`); r.MatchString(lower) {
-			out = append(out, r.ReplaceAllString(lower, ""))
+	add := func(s string) {
+		if s == "" || s == lower {
+			return
 		}
+		if _, dup := seen[s]; dup {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	// 0. 别名映射预检（grok → grok-4.5、grok-build → grok-build-0.1、点↔连字符）
+	if alias, ok := branchAliasMap[lower]; ok {
+		add(alias)
+	}
+	// 1. 去日期后缀 -2025-12-11
+	if r := regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`); r.MatchString(lower) {
+		add(r.ReplaceAllString(lower, ""))
 	}
 	// 2. 去 8 位日期后缀 -20251211
 	if r := regexp.MustCompile(`-\d{8}$`); r.MatchString(lower) {
-		out = append(out, r.ReplaceAllString(lower, ""))
+		add(r.ReplaceAllString(lower, ""))
 	}
 	// 3. 逐段剥离最后一个 - 段（gpt-5.6-terra-openai-compact -> gpt-5.6-terra-openai -> gpt-5.6-terra -> gpt-5.6）
 	cur := lower
@@ -818,7 +843,11 @@ func branchModelCandidates(model string) []string {
 			break
 		}
 		cur = cur[:idx]
-		out = append(out, cur)
+		add(cur)
+		// 3.1 点↔连字符版本号变体（grok-4.20 → grok-4-20；models.dev 两种命名并存）
+		if strings.Contains(cur, ".") {
+			add(strings.ReplaceAll(cur, ".", "-"))
+		}
 	}
 	return out
 }
