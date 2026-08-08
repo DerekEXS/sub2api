@@ -553,6 +553,10 @@ export default {
     },
     table: {
       model: 'Model',
+      params: 'Params',
+      modal: 'Modalities',
+      maxOutput: 'Max Output',
+      context: 'Context',
       input: 'Input',
       output: 'Output',
       cache: 'Cache',
@@ -560,7 +564,6 @@ export default {
       cacheRead: 'Read',
       paidPrice: 'Your Price (Discounted)',
       officialPrice: 'Official Price',
-      rate: 'Rate',
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',
       perUnitImage: '/ image',
