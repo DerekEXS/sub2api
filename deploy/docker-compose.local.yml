@@ -24,7 +24,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: derekexs/sub2api:v0.1.172
+    image: ${SUB2API_IMAGE:-derekexs/sub2api:v0.1.172}
     container_name: sub2api
     restart: unless-stopped
     security_opt:
@@ -50,6 +50,9 @@ services:
       # =======================================================================
       # Server Configuration
       # =======================================================================
+      # models.dev 官方价数据源（fork 新增：30 分钟轮询；本地测试 1 分钟）
+      - PRICING_MODELSDEV_URL=${PRICING_MODELSDEV_URL:-https://models.dev/api.json}
+      - PRICING_MODELSDEV_SYNC_INTERVAL_MINUTES=${PRICING_MODELSDEV_SYNC_INTERVAL_MINUTES:-30}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}

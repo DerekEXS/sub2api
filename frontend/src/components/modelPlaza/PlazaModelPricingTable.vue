@@ -81,6 +81,20 @@
               >
                 {{ billingModeLabel(m) }}
               </span>
+              <!-- 模型元数据徽章（fork 新增：context / 模态，来源 models.dev） -->
+              <span
+                v-if="(m.context_length ?? 0) > 0"
+                class="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                :title="`${(m.context_length ?? 0).toLocaleString()} tokens`"
+              >
+                {{ fmtContext(m.context_length ?? 0) }}
+              </span>
+              <span
+                v-if="m.modalities?.length"
+                class="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-dark-700/70 dark:text-dark-300"
+              >
+                {{ m.modalities.join('/') }}
+              </span>
             </div>
           </td>
 
@@ -274,6 +288,16 @@ function billingModeLabel(m: PlazaModel): string {
   return billingMode(m) === BILLING_MODE_IMAGE
     ? t('modelPlaza.table.perImage')
     : t('modelPlaza.table.perRequest')
+}
+
+/** context 长度格式化：204800 -> 200K，1000000 -> 1M（fork 新增） */
+function fmtContext(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return `${n}`
 }
 
 /** 价格统一保底 2 位小数,更长的有效小数原样保留。 */

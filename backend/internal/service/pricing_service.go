@@ -171,6 +171,9 @@ type PricingService struct {
 	lastUpdated  time.Time
 	localHash    string
 
+	// models.dev 官方价数据源（additive 兜底 + 模型元数据，2026-08-08 fork 新增）
+	modelsDev *ModelsDevClient
+
 	// 停止信号
 	stopCh chan struct{}
 	wg     sync.WaitGroup
@@ -183,6 +186,9 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 		remoteClient: remoteClient,
 		pricingData:  make(map[string]*LiteLLMModelPricing),
 		stopCh:       make(chan struct{}),
+	}
+	if cfg.Pricing.ModelsDevURL != "" {
+		s.modelsDev = NewModelsDevClient(cfg.Pricing.ModelsDevURL)
 	}
 	return s
 }
@@ -205,8 +211,45 @@ func (s *PricingService) Initialize() error {
 	// 启动定时更新
 	s.startUpdateScheduler()
 
+	// models.dev 官方价数据源：首次同步 + 30 分钟轮询（fork 新增）
+	if s.modelsDev != nil && s.modelsDev.Enabled() {
+		if err := s.modelsDev.Sync(context.Background()); err != nil {
+			logger.LegacyPrintf("service.pricing", "[Pricing] models.dev initial sync failed: %v", err)
+		} else {
+			logger.LegacyPrintf("service.pricing", "[Pricing] models.dev synced %d models", s.modelsDev.Count())
+		}
+		s.startModelsDevScheduler()
+	}
+
 	logger.LegacyPrintf("service.pricing", "[Pricing] Service initialized with %d models", len(s.pricingData))
 	return nil
+}
+
+// startModelsDevScheduler models.dev 定期轮询（默认 30 分钟，热更新）
+func (s *PricingService) startModelsDevScheduler() {
+	interval := time.Duration(s.cfg.Pricing.ModelsDevSyncIntervalMinutes) * time.Minute
+	if interval < time.Minute {
+		interval = 30 * time.Minute
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := s.modelsDev.Sync(context.Background()); err != nil {
+					logger.LegacyPrintf("service.pricing", "[Pricing] models.dev sync failed: %v", err)
+				} else {
+					logger.LegacyPrintf("service.pricing", "[Pricing] models.dev synced %d models (interval %v)", s.modelsDev.Count(), interval)
+				}
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+	logger.LegacyPrintf("service.pricing", "[Pricing] models.dev scheduler started (every %v)", interval)
 }
 
 // Stop 停止价格服务
@@ -691,7 +734,41 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 		return s.matchOpenAIModel(lookupCandidates[0])
 	}
 
+	// 6. models.dev 官方价兜底（fork 新增：只查不写，additive 语义由调用方控制）
+	if s.modelsDev != nil {
+		if m, ok := s.modelsDev.Lookup(lookupCandidates[0]); ok {
+			return ModelsDevModelPricing(m)
+		}
+	}
+
 	return nil
+}
+
+// GetModelMetadata 查询模型元数据（context_length / modalities），供模型广场展示。
+// 数据源：models.dev。返回零值表示无元数据。
+func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, modalities []string) {
+	if s == nil || s.modelsDev == nil || modelName == "" {
+		return 0, nil
+	}
+	m, ok := s.modelsDev.Lookup(modelName)
+	if !ok {
+		return 0, nil
+	}
+	contextLen = m.Limit.Context
+	seen := make(map[string]struct{})
+	for _, mods := range [][]string{m.Modalities.Input, m.Modalities.Output} {
+		for _, mod := range mods {
+			if mod == "" {
+				continue
+			}
+			if _, dup := seen[mod]; dup {
+				continue
+			}
+			seen[mod] = struct{}{}
+			modalities = append(modalities, mod)
+		}
+	}
+	return contextLen, modalities
 }
 
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {
@@ -1052,11 +1129,21 @@ func (s *PricingService) GetStatus() map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return map[string]any{
+	status := map[string]any{
 		"model_count":  len(s.pricingData),
 		"last_updated": s.lastUpdated,
 		"local_hash":   s.localHash[:min(8, len(s.localHash))],
 	}
+	// models.dev 状态（fork 新增）
+	if s.modelsDev != nil && s.modelsDev.Enabled() {
+		syncAt, syncErr := s.modelsDev.LastSync()
+		status["modelsdev_models"] = s.modelsDev.Count()
+		status["modelsdev_last_sync"] = syncAt
+		if syncErr != "" {
+			status["modelsdev_sync_error"] = syncErr
+		}
+	}
+	return status
 }
 
 // ForceUpdate 强制更新
