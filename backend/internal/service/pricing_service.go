@@ -695,6 +695,33 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
 	lookupCandidates := s.buildModelLookupCandidates(modelLower)
 
+	// 1~3. 确定性识别（精确名 / 已知拼写变体 / 去掉日期版本后缀）
+	if pricing := s.lookupIdentifiedModelPricingLocked(lookupCandidates); pricing != nil {
+		return pricing
+	}
+
+	// 4. 基于模型系列匹配（Claude）
+	if pricing := s.matchByModelFamily(lookupCandidates[0]); pricing != nil {
+		return pricing
+	}
+
+	// 5. OpenAI 模型回退策略
+	if strings.HasPrefix(lookupCandidates[0], "gpt-") {
+		return s.matchOpenAIModel(lookupCandidates[0])
+	}
+
+	return nil
+}
+
+// lookupIdentifiedModelPricingLocked 只做"确定性识别"的三步查找：精确键、已知拼写
+// 变体、去掉日期/版本后缀后的同名条目。它刻意不包含 matchByModelFamily /
+// matchOpenAIModel 这类按子串猜系列的兜底——那些兜底会给任意名字都返回一个价格。
+// 调用方必须持有 s.mu 读锁。
+func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []string) *LiteLLMModelPricing {
+	if len(lookupCandidates) == 0 {
+		return nil
+	}
+
 	// 1. 精确匹配
 	for _, candidate := range lookupCandidates {
 		if candidate == "" {
@@ -872,7 +899,29 @@ func resolveBranchToMainModel(candidates []string, lookup func(string) bool) (st
 //   2. models.dev 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
 //   3. SUB2API 官方（LiteLLM 主文件 + fallback，含现有变体/家族回退与分支引导）
 // models.dev 获取失败（同步失败/无数据）时自然回退到 SUB2API 官方。
+func (s *PricingService) GetIdentifiedModelPricing(modelName string) *LiteLLMModelPricing {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if modelLower == "" {
+		return nil
+	}
+	return s.lookupIdentifiedModelPricingLocked(s.buildModelLookupCandidates(modelLower))
+}
+
+// GetOfficialPricingPreferModelsDev 官方价格获取（plaza 展示用，fork 新增）。
+// 回退链：models.dev 精确 -> 分支引导 -> SUB2API 官方。
 func (s *PricingService) GetOfficialPricingPreferModelsDev(modelName string) *LiteLLMModelPricing {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
 	if modelLower == "" {
 		return nil
