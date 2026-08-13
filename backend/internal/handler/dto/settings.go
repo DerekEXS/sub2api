@@ -280,11 +280,11 @@ type SystemSettings struct {
 	PaymentFXApiURL           string   `json:"payment_fx_api_url"`          // 自定义汇率 API（留空=用 fallback）
 	PaymentFXApiURLs          []string `json:"payment_fx_api_urls"`         // 多 FX API 回退链（v4.6.2 task 2，换行分隔）
 	PaymentFXFallbackRate     float64  `json:"payment_fx_fallback_rate"`    // 固定汇率（CNY per USD，默认 6.8）
-	PaymentLoadBalanceStrat          string   `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         string   `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         string   `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              string   `json:"payment_help_image_url"`
-	PaymentHelpText                  string   `json:"payment_help_text"`
+	PaymentLoadBalanceStrat   string   `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix  string   `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix  string   `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL       string   `json:"payment_help_image_url"`
+	PaymentHelpText           string   `json:"payment_help_text"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`

@@ -120,9 +120,9 @@ func (c *ModelsDevClient) Sync(ctx context.Context) error {
 	// 平局时取 provider 名排序靠前的条目。
 	type priceKey struct{ in, out, cr, cw float64 }
 	type entry struct {
-		p   string
-		m   ModelsDevModel
-		pk  priceKey
+		p  string
+		m  ModelsDevModel
+		pk priceKey
 	}
 	byKey := make(map[string][]entry, len(providers)*8)
 	for _, p := range names {
@@ -132,8 +132,8 @@ func (c *ModelsDevClient) Sync(ctx context.Context) error {
 				continue
 			}
 			byKey[key] = append(byKey[key], entry{
-				p: p,
-				m: m,
+				p:  p,
+				m:  m,
 				pk: priceKey{m.Cost.Input, m.Cost.Output, m.Cost.CacheRead, m.Cost.CacheWrite},
 			})
 		}

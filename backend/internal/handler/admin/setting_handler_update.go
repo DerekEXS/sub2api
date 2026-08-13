@@ -316,10 +316,10 @@ type UpdateSettingsRequest struct {
 	PaymentFXApiURLs          []string `json:"payment_fx_api_urls"`
 	PaymentFXFallbackRate     *float64 `json:"payment_fx_fallback_rate"`
 	PaymentLoadBalanceStrat   *string  `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         *string  `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         *string  `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              *string  `json:"payment_help_image_url"`
-	PaymentHelpText                  *string  `json:"payment_help_text"`
+	PaymentProductNamePrefix  *string  `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix  *string  `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL       *string  `json:"payment_help_image_url"`
+	PaymentHelpText           *string  `json:"payment_help_text"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled *bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -2044,23 +2044,23 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// Skip if no payment fields were provided (prevents accidental wipe).
 	if h.paymentConfigService != nil && hasPaymentFields(req) {
 		paymentReq := service.UpdatePaymentConfigRequest{
-			Enabled:                       req.PaymentEnabled,
-			MinAmount:                     req.PaymentMinAmount,
-			MaxAmount:                     req.PaymentMaxAmount,
-			DailyLimit:                    req.PaymentDailyLimit,
-			OrderTimeoutMin:               req.PaymentOrderTimeoutMin,
-			MaxPendingOrders:              req.PaymentMaxPendingOrders,
-			EnabledTypes:                  req.PaymentEnabledTypes,
-			BalanceDisabled:               req.PaymentBalanceDisabled,
-			BalanceRechargeMultiplier:     req.PaymentBalanceRechargeMultiplier,
-			SubscriptionUSDToCNYRate:      req.PaymentSubscriptionUSDToCNYRate,
-			RechargeFeeRate:               req.PaymentRechargeFeeRate,
+			Enabled:                   req.PaymentEnabled,
+			MinAmount:                 req.PaymentMinAmount,
+			MaxAmount:                 req.PaymentMaxAmount,
+			DailyLimit:                req.PaymentDailyLimit,
+			OrderTimeoutMin:           req.PaymentOrderTimeoutMin,
+			MaxPendingOrders:          req.PaymentMaxPendingOrders,
+			EnabledTypes:              req.PaymentEnabledTypes,
+			BalanceDisabled:           req.PaymentBalanceDisabled,
+			BalanceRechargeMultiplier: req.PaymentBalanceRechargeMultiplier,
+			SubscriptionUSDToCNYRate:  req.PaymentSubscriptionUSDToCNYRate,
+			RechargeFeeRate:           req.PaymentRechargeFeeRate,
 			// v4.6.2 currency separation
-			SettlementCurrency: req.PaymentSettlementCurrency,
-			RechargeCurrency:   req.PaymentRechargeCurrency,
-			FXApiURL:           req.PaymentFXApiURL,
-			FXApiURLs:          req.PaymentFXApiURLs,
-			FXFallbackRate:     req.PaymentFXFallbackRate,
+			SettlementCurrency:            req.PaymentSettlementCurrency,
+			RechargeCurrency:              req.PaymentRechargeCurrency,
+			FXApiURL:                      req.PaymentFXApiURL,
+			FXApiURLs:                     req.PaymentFXApiURLs,
+			FXFallbackRate:                req.PaymentFXFallbackRate,
 			LoadBalanceStrategy:           req.PaymentLoadBalanceStrat,
 			ProductNamePrefix:             req.PaymentProductNamePrefix,
 			ProductNameSuffix:             req.PaymentProductNameSuffix,
@@ -2338,23 +2338,23 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentSubscriptionUSDToCNYRate:                        updatedPaymentCfg.SubscriptionUSDToCNYRate,
 		PaymentRechargeFeeRate:                                 updatedPaymentCfg.RechargeFeeRate,
 		// v4.6.2 currency separation
-		PaymentSettlementCurrency:                              updatedPaymentCfg.SettlementCurrency,
-		PaymentRechargeCurrency:                                updatedPaymentCfg.RechargeCurrency,
-		PaymentFXApiURL:                                        updatedPaymentCfg.FXApiURL,
-		PaymentFXApiURLs:                                       updatedPaymentCfg.FXApiURLs,
-		PaymentFXFallbackRate:                                  updatedPaymentCfg.FXFallbackRate,
-		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
-		PaymentProductNamePrefix:                               updatedPaymentCfg.ProductNamePrefix,
-		PaymentProductNameSuffix:                               updatedPaymentCfg.ProductNameSuffix,
-		PaymentHelpImageURL:                                    updatedPaymentCfg.HelpImageURL,
-		PaymentHelpText:                                        updatedPaymentCfg.HelpText,
-		PaymentCancelRateLimitEnabled:                          updatedPaymentCfg.CancelRateLimitEnabled,
-		PaymentCancelRateLimitMax:                              updatedPaymentCfg.CancelRateLimitMax,
-		PaymentCancelRateLimitWindow:                           updatedPaymentCfg.CancelRateLimitWindow,
-		PaymentCancelRateLimitUnit:                             updatedPaymentCfg.CancelRateLimitUnit,
-		PaymentCancelRateLimitMode:                             updatedPaymentCfg.CancelRateLimitMode,
-		PaymentAlipayForceQRCode:                               updatedPaymentCfg.AlipayForceQRCode,
-		PaymentAlipayMobilePrecreateDeepLink:                   updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
+		PaymentSettlementCurrency:            updatedPaymentCfg.SettlementCurrency,
+		PaymentRechargeCurrency:              updatedPaymentCfg.RechargeCurrency,
+		PaymentFXApiURL:                      updatedPaymentCfg.FXApiURL,
+		PaymentFXApiURLs:                     updatedPaymentCfg.FXApiURLs,
+		PaymentFXFallbackRate:                updatedPaymentCfg.FXFallbackRate,
+		PaymentLoadBalanceStrat:              updatedPaymentCfg.LoadBalanceStrategy,
+		PaymentProductNamePrefix:             updatedPaymentCfg.ProductNamePrefix,
+		PaymentProductNameSuffix:             updatedPaymentCfg.ProductNameSuffix,
+		PaymentHelpImageURL:                  updatedPaymentCfg.HelpImageURL,
+		PaymentHelpText:                      updatedPaymentCfg.HelpText,
+		PaymentCancelRateLimitEnabled:        updatedPaymentCfg.CancelRateLimitEnabled,
+		PaymentCancelRateLimitMax:            updatedPaymentCfg.CancelRateLimitMax,
+		PaymentCancelRateLimitWindow:         updatedPaymentCfg.CancelRateLimitWindow,
+		PaymentCancelRateLimitUnit:           updatedPaymentCfg.CancelRateLimitUnit,
+		PaymentCancelRateLimitMode:           updatedPaymentCfg.CancelRateLimitMode,
+		PaymentAlipayForceQRCode:             updatedPaymentCfg.AlipayForceQRCode,
+		PaymentAlipayMobilePrecreateDeepLink: updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
 
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,

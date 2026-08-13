@@ -41,10 +41,10 @@ func (h *SettingHandler) TestFXAPI(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{
-		"ok":            true,
-		"base":          base,
-		"rate_usd_cny":  rate,
-		"latency_ms":    latency,
+		"ok":           true,
+		"base":         base,
+		"rate_usd_cny": rate,
+		"latency_ms":   latency,
 	})
 }
 

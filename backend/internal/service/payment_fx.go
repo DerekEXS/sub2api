@@ -40,8 +40,8 @@ const (
 type fxCacheEntry struct {
 	FromCurrency string    `json:"from_currency"`
 	ToCurrency   string    `json:"to_currency"`
-	Rate         float64   `json:"rate"`     // 1 from = rate to
-	BaseCurrency string    `json:"base"`     // 原始 base（用户 API 的 base）
+	Rate         float64   `json:"rate"` // 1 from = rate to
+	BaseCurrency string    `json:"base"` // 原始 base（用户 API 的 base）
 	FetchedAt    time.Time `json:"fetched_at"`
 	SuccessCount int       `json:"success_count"`
 }
@@ -66,9 +66,9 @@ func NewFXService(log *zap.Logger) *FXService {
 	cachePath := filepath.Join(getAppDataDir(), fxCacheFileName)
 	_ = os.MkdirAll(filepath.Dir(cachePath), 0o755)
 	s := &FXService{
-		cache:     fxCacheFile{Entries: map[string]fxCacheEntry{}},
-		cachePath: cachePath,
-		log:       log,
+		cache:      fxCacheFile{Entries: map[string]fxCacheEntry{}},
+		cachePath:  cachePath,
+		log:        log,
 		httpClient: &http.Client{Timeout: fxHTTPTimeout},
 		clock:      time.Now,
 	}

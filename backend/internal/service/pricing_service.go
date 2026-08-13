@@ -823,12 +823,12 @@ func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, m
 // branchAliasMap 已知裸名/别名 → 主模型映射（models.dev 未收录裸名的场景，
 // 2026-08-08 GROK 修复补充）。命中后直接作为主模型候选。
 var branchAliasMap = map[string]string{
-	"grok":               "grok-4.5",       // 裸 grok = grok-4.5（xAI 官方 bare ID）
-	"grok-build":         "grok-build-0.1", // models.dev 只收录带版本号条目
-	"grok-build-latest":  "grok-build-0.1",
-	"grok-4.20":          "grok-4-20",      // 点/连字符命名差异（models.dev 用 grok-4-20）
-	"grok-4.20-fast":     "grok-4-20",      // fast 变体引导到基础版
-	"grok-4.20-reasoning": "grok-4-20",
+	"grok":                    "grok-4.5",       // 裸 grok = grok-4.5（xAI 官方 bare ID）
+	"grok-build":              "grok-build-0.1", // models.dev 只收录带版本号条目
+	"grok-build-latest":       "grok-build-0.1",
+	"grok-4.20":               "grok-4-20", // 点/连字符命名差异（models.dev 用 grok-4-20）
+	"grok-4.20-fast":          "grok-4-20", // fast 变体引导到基础版
+	"grok-4.20-reasoning":     "grok-4-20",
 	"grok-4.20-non-reasoning": "grok-4-20",
 }
 
@@ -895,9 +895,10 @@ func resolveBranchToMainModel(candidates []string, lookup func(string) bool) (st
 
 // GetOfficialPricingPreferModelsDev 官方价格获取（plaza 展示用，fork 新增）。
 // 回退链（用户 2026-08-08 规范）：
-//   1. models.dev 精确匹配（实时官方价）
-//   2. models.dev 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
-//   3. SUB2API 官方（LiteLLM 主文件 + fallback，含现有变体/家族回退与分支引导）
+//  1. models.dev 精确匹配（实时官方价）
+//  2. models.dev 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
+//  3. SUB2API 官方（LiteLLM 主文件 + fallback，含现有变体/家族回退与分支引导）
+//
 // models.dev 获取失败（同步失败/无数据）时自然回退到 SUB2API 官方。
 func (s *PricingService) GetIdentifiedModelPricing(modelName string) *LiteLLMModelPricing {
 	if s == nil {

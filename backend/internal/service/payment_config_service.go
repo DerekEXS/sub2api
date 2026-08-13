@@ -27,8 +27,8 @@ const (
 	SettingBalanceRechargeMult = "BALANCE_RECHARGE_MULTIPLIER"
 	// SettingSubscriptionUSDToCNYRate 是订阅 CNY 换算汇率（1 USD = X CNY）。
 	// 0/未配置 = 关闭换算（订阅按 price 数值直付），显式配置后 CNY 通道订阅按 price × rate 收款。
-	SettingSubscriptionUSDToCNYRate      = "SUBSCRIPTION_USD_TO_CNY_RATE"
-	SettingRechargeFeeRate               = "RECHARGE_FEE_RATE"
+	SettingSubscriptionUSDToCNYRate = "SUBSCRIPTION_USD_TO_CNY_RATE"
+	SettingRechargeFeeRate          = "RECHARGE_FEE_RATE"
 	// === v4.6.2 结算/充值币种分离（主人规范 2026-08-02）===
 	// SettlementCurrency: 充值后到账的余额单位（默认 USD）
 	// RechargeCurrency:   支付页面输入货币（默认 CNY）
@@ -39,8 +39,8 @@ const (
 	SettingFXApiURL           = "PAYMENT_FX_API_URL"
 	// SettingFXApiURLs 多 FX API 地址（换行分隔），按顺序试，主失败自动降级到下一条（v4.6.2 task 2）。
 	// 单 URL 仍存在兼容旧配置；多 URL 时优先用 SettingFXApiURLs。
-	SettingFXApiURLs      = "PAYMENT_FX_API_URLS"
-	SettingFXFallbackRate = "PAYMENT_FX_FALLBACK_RATE"
+	SettingFXApiURLs                     = "PAYMENT_FX_API_URLS"
+	SettingFXFallbackRate                = "PAYMENT_FX_FALLBACK_RATE"
 	SettingProductNamePrefix             = "PRODUCT_NAME_PREFIX"
 	SettingProductNameSuffix             = "PRODUCT_NAME_SUFFIX"
 	SettingHelpImageURL                  = "PAYMENT_HELP_IMAGE_URL"
@@ -83,17 +83,17 @@ type PaymentConfig struct {
 	// FXApiURL:           用户自定义汇率 API（留空=用 FXFallbackRate）
 	// FXApiURLs:          多 URL 换行分隔回退链（v4.6.2 task 2）
 	// FXFallbackRate:     固定汇率（CNY per USD，默认 6.8）；跨币种时按此换算
-	SettlementCurrency string   `json:"settlement_currency"`
-	RechargeCurrency   string   `json:"recharge_currency"`
-	FXApiURL           string   `json:"fx_api_url"`
-	FXApiURLs          []string `json:"fx_api_urls"`
-	FXFallbackRate     float64  `json:"fx_fallback_rate"`
-	LoadBalanceStrategy      string  `json:"load_balance_strategy"`
-	ProductNamePrefix        string  `json:"product_name_prefix"`
-	ProductNameSuffix        string  `json:"product_name_suffix"`
-	HelpImageURL             string  `json:"help_image_url"`
-	HelpText                 string  `json:"help_text"`
-	StripePublishableKey     string  `json:"stripe_publishable_key,omitempty"`
+	SettlementCurrency   string   `json:"settlement_currency"`
+	RechargeCurrency     string   `json:"recharge_currency"`
+	FXApiURL             string   `json:"fx_api_url"`
+	FXApiURLs            []string `json:"fx_api_urls"`
+	FXFallbackRate       float64  `json:"fx_fallback_rate"`
+	LoadBalanceStrategy  string   `json:"load_balance_strategy"`
+	ProductNamePrefix    string   `json:"product_name_prefix"`
+	ProductNameSuffix    string   `json:"product_name_suffix"`
+	HelpImageURL         string   `json:"help_image_url"`
+	HelpText             string   `json:"help_text"`
+	StripePublishableKey string   `json:"stripe_publishable_key,omitempty"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled bool   `json:"cancel_rate_limit_enabled"`
@@ -122,16 +122,16 @@ type UpdatePaymentConfigRequest struct {
 	SubscriptionUSDToCNYRate  *float64 `json:"subscription_usd_to_cny_rate"`
 	RechargeFeeRate           *float64 `json:"recharge_fee_rate"`
 	// === v4.6.2 结算/充值币种分离（主人规范 2026-08-02）===
-	SettlementCurrency *string  `json:"settlement_currency"`
-	RechargeCurrency   *string  `json:"recharge_currency"`
-	FXApiURL           *string  `json:"fx_api_url"`
-	FXApiURLs          []string `json:"fx_api_urls"`
-	FXFallbackRate     *float64 `json:"fx_fallback_rate"`
-	LoadBalanceStrategy       *string  `json:"load_balance_strategy"`
-	ProductNamePrefix         *string  `json:"product_name_prefix"`
-	ProductNameSuffix         *string  `json:"product_name_suffix"`
-	HelpImageURL              *string  `json:"help_image_url"`
-	HelpText                  *string  `json:"help_text"`
+	SettlementCurrency  *string  `json:"settlement_currency"`
+	RechargeCurrency    *string  `json:"recharge_currency"`
+	FXApiURL            *string  `json:"fx_api_url"`
+	FXApiURLs           []string `json:"fx_api_urls"`
+	FXFallbackRate      *float64 `json:"fx_fallback_rate"`
+	LoadBalanceStrategy *string  `json:"load_balance_strategy"`
+	ProductNamePrefix   *string  `json:"product_name_prefix"`
+	ProductNameSuffix   *string  `json:"product_name_suffix"`
+	HelpImageURL        *string  `json:"help_image_url"`
+	HelpText            *string  `json:"help_text"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled *bool   `json:"cancel_rate_limit_enabled"`
@@ -285,16 +285,16 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		SubscriptionUSDToCNYRate:  normalizeSubscriptionUSDToCNYRate(pcParseFloat(vals[SettingSubscriptionUSDToCNYRate], 0)),
 		RechargeFeeRate:           pcParseFloat(vals[SettingRechargeFeeRate], 0),
 		// v4.6.2 currency separation
-		SettlementCurrency: NormalizePaymentCurrency(vals[SettingSettlementCurrency], "USD"),
-		RechargeCurrency:   NormalizePaymentCurrency(vals[SettingRechargeCurrency], "CNY"),
-		FXApiURL:           strings.TrimSpace(vals[SettingFXApiURL]),
-		FXApiURLs:          parseFXApiURLs(vals[SettingFXApiURLs]),
-		FXFallbackRate:     NormalizeFXFallbackRate(pcParseFloat(vals[SettingFXFallbackRate], defaultFXFallbackRate)),
-		LoadBalanceStrategy:       vals[SettingLoadBalanceStrategy],
-		ProductNamePrefix:         vals[SettingProductNamePrefix],
-		ProductNameSuffix:         vals[SettingProductNameSuffix],
-		HelpImageURL:              vals[SettingHelpImageURL],
-		HelpText:                  vals[SettingHelpText],
+		SettlementCurrency:  NormalizePaymentCurrency(vals[SettingSettlementCurrency], "USD"),
+		RechargeCurrency:    NormalizePaymentCurrency(vals[SettingRechargeCurrency], "CNY"),
+		FXApiURL:            strings.TrimSpace(vals[SettingFXApiURL]),
+		FXApiURLs:           parseFXApiURLs(vals[SettingFXApiURLs]),
+		FXFallbackRate:      NormalizeFXFallbackRate(pcParseFloat(vals[SettingFXFallbackRate], defaultFXFallbackRate)),
+		LoadBalanceStrategy: vals[SettingLoadBalanceStrategy],
+		ProductNamePrefix:   vals[SettingProductNamePrefix],
+		ProductNameSuffix:   vals[SettingProductNameSuffix],
+		HelpImageURL:        vals[SettingHelpImageURL],
+		HelpText:            vals[SettingHelpText],
 
 		CancelRateLimitEnabled: vals[SettingCancelRateLimitOn] == "true",
 		CancelRateLimitMax:     pcParseInt(vals[SettingCancelRateLimitMax], 10),

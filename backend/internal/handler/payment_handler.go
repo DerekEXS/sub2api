@@ -154,19 +154,19 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	}
 
 	response.Success(c, checkoutInfoResponse{
-		Methods:                       limitsResp.Methods,
-		GlobalMin:                     limitsResp.GlobalMin,
-		GlobalMax:                     limitsResp.GlobalMax,
-		Plans:                         planList,
-		BalanceDisabled:               cfg.BalanceDisabled,
-		BalanceRechargeMultiplier:     cfg.BalanceRechargeMultiplier,
-		SubscriptionUSDToCNYRate:      cfg.SubscriptionUSDToCNYRate,
-		RechargeFeeRate:               cfg.RechargeFeeRate,
+		Methods:                   limitsResp.Methods,
+		GlobalMin:                 limitsResp.GlobalMin,
+		GlobalMax:                 limitsResp.GlobalMax,
+		Plans:                     planList,
+		BalanceDisabled:           cfg.BalanceDisabled,
+		BalanceRechargeMultiplier: cfg.BalanceRechargeMultiplier,
+		SubscriptionUSDToCNYRate:  cfg.SubscriptionUSDToCNYRate,
+		RechargeFeeRate:           cfg.RechargeFeeRate,
 		// v4.6.2 currency separation
-		SettlementCurrency: cfg.SettlementCurrency,
-		RechargeCurrency:   cfg.RechargeCurrency,
-		FXFallbackRate:     cfg.FXFallbackRate,
-		FXRate:             fxRate,
+		SettlementCurrency:            cfg.SettlementCurrency,
+		RechargeCurrency:              cfg.RechargeCurrency,
+		FXFallbackRate:                cfg.FXFallbackRate,
+		FXRate:                        fxRate,
 		HelpText:                      cfg.HelpText,
 		HelpImageURL:                  cfg.HelpImageURL,
 		StripePublishableKey:          cfg.StripePublishableKey,
@@ -176,24 +176,24 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 }
 
 type checkoutInfoResponse struct {
-	Methods                       map[string]service.MethodLimits `json:"methods"`
-	GlobalMin                     float64                         `json:"global_min"`
-	GlobalMax                     float64                         `json:"global_max"`
-	Plans                         []checkoutPlan                  `json:"plans"`
-	BalanceDisabled               bool                            `json:"balance_disabled"`
-	BalanceRechargeMultiplier     float64                         `json:"balance_recharge_multiplier"`
-	SubscriptionUSDToCNYRate      float64                         `json:"subscription_usd_to_cny_rate"`
-	RechargeFeeRate               float64                         `json:"recharge_fee_rate"`
+	Methods                   map[string]service.MethodLimits `json:"methods"`
+	GlobalMin                 float64                         `json:"global_min"`
+	GlobalMax                 float64                         `json:"global_max"`
+	Plans                     []checkoutPlan                  `json:"plans"`
+	BalanceDisabled           bool                            `json:"balance_disabled"`
+	BalanceRechargeMultiplier float64                         `json:"balance_recharge_multiplier"`
+	SubscriptionUSDToCNYRate  float64                         `json:"subscription_usd_to_cny_rate"`
+	RechargeFeeRate           float64                         `json:"recharge_fee_rate"`
 	// === v4.6.2 currency separation ===
-	SettlementCurrency string  `json:"settlement_currency"`
-	RechargeCurrency   string  `json:"recharge_currency"`
-	FXFallbackRate     float64 `json:"fx_fallback_rate"`
-	FXRate             float64 `json:"fx_rate"` // 实时汇率（API 优先），0=不可用
-	HelpText                      string                          `json:"help_text"`
-	HelpImageURL                  string                          `json:"help_image_url"`
-	StripePublishableKey          string                          `json:"stripe_publishable_key"`
-	AlipayForceQRCode             bool                            `json:"alipay_force_qrcode"`
-	AlipayMobilePrecreateDeepLink bool                            `json:"alipay_mobile_precreate_deep_link"`
+	SettlementCurrency            string  `json:"settlement_currency"`
+	RechargeCurrency              string  `json:"recharge_currency"`
+	FXFallbackRate                float64 `json:"fx_fallback_rate"`
+	FXRate                        float64 `json:"fx_rate"` // 实时汇率（API 优先），0=不可用
+	HelpText                      string  `json:"help_text"`
+	HelpImageURL                  string  `json:"help_image_url"`
+	StripePublishableKey          string  `json:"stripe_publishable_key"`
+	AlipayForceQRCode             bool    `json:"alipay_force_qrcode"`
+	AlipayMobilePrecreateDeepLink bool    `json:"alipay_mobile_precreate_deep_link"`
 }
 
 type checkoutPlan struct {
