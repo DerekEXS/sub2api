@@ -2794,7 +2794,8 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 	if freshUntil == nil || !freshUntil.After(receivedAt) || now.Before(receivedAt) || now.After(*freshUntil) {
 		return 0, false
 	}
-	return upstreamBillingRateAt(snapshot.Data, now)
+	// 调度器按账号比价，无计费模型上下文 → model=""（白名单不参与，视为全模型）。
+	return upstreamBillingRateAt(snapshot.Data, now, "")
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {

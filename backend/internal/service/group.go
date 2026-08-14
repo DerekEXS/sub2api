@@ -253,8 +253,14 @@ func (g *Group) GetRoutingAccountIDs(requestedModel string) []int64 {
 }
 
 // matchModelPattern 检查模型是否匹配模式
-// 支持 * 通配符，如 "claude-opus-*" 匹配 "claude-opus-4-20250514"
+// 支持 * 通配符，如 "claude-opus-*" 匹配 "claude-opus-4-20250514"。
+// 匹配大小写不敏感：pattern 与 model 都做 ToLower 归一后比较。
+// 生产实证（#55/#113）上游账号映射与请求侧模型的大小写变体是常态，
+// 窗口级模型白名单必须让 "deepseek-v4-flash" 命中计费模型 "DeepSeek-V4-Flash"，
+// 模型路由（ModelRouting 通配符）同样受益。
 func matchModelPattern(pattern, model string) bool {
+	pattern = strings.ToLower(pattern)
+	model = strings.ToLower(model)
 	if pattern == model {
 		return true
 	}
@@ -377,7 +383,7 @@ func modelMatchesAny(patterns []string, model string) bool {
 //   - 无多窗口时校验 legacy 单窗口：start/end 必填且合法（end>start，不支持跨天），multiplier>=0；
 //   - multiplier=0 是允许的，表示高峰 token 请求按 0 倍计费，可用于折扣/免费策略；
 //   - enabled=false 时放行（不关心类型与内容）。
-func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64, windows []PeakWindow) error {
+func ValidatePeakRateConfig(enabled bool, start, end string, multiplier float64, windows []PeakWindow) error {
 	if !enabled {
 		return nil
 	}
@@ -454,13 +460,13 @@ func ValidatePeakWindows(windows []PeakWindow) error {
 }
 
 // NormalizePeakRateConfig 归一化最终落库的单窗口高峰配置，CreateGroup 与 UpdateGroup 两条写路径共用（唯一收口）：
-//   - 订阅类型限制已放开：不再按 subscriptionType 清空配置（standard 分组可携带高峰配置）；
+//   - 订阅类型限制已放开：standard 分组可携带高峰配置；
 //   - 关闭高峰时保留已配置的合法窗口（便于临时停用后再启用），
 //     但清掉无法解析的脏字符串与负倍率，避免脏数据入库。
 //
 // 与 ValidatePeakRateConfig 的分工：enabled=true 时校验已保证各字段合法，本函数为无操作；
 // enabled=false 时校验放行，由本函数兜底清洗。调用顺序为先归一化、后校验。
-func NormalizePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64) (bool, string, string, float64) {
+func NormalizePeakRateConfig(enabled bool, start, end string, multiplier float64) (bool, string, string, float64) {
 	if !enabled {
 		if _, ok := parseMinutes(start); !ok {
 			start = ""

@@ -680,12 +680,76 @@ func TestUpstreamBillingRateAtHandlesDST(t *testing.T) {
 	beforeJump := time.Date(2026, time.March, 8, 6, 30, 0, 0, time.UTC)
 	afterJump := time.Date(2026, time.March, 8, 7, 30, 0, 0, time.UTC)
 
-	rate, ok := upstreamBillingRateAt(data, beforeJump)
+	rate, ok := upstreamBillingRateAt(data, beforeJump, "")
 	require.True(t, ok)
 	require.Equal(t, 1.0, rate)
-	rate, ok = upstreamBillingRateAt(data, afterJump)
+	rate, ok = upstreamBillingRateAt(data, afterJump, "")
 	require.True(t, ok)
 	require.Equal(t, 2.0, rate)
+}
+
+// TestUpstreamBillingRateAtWindowWhitelist 账号成本侧多窗口模型白名单：
+// model 非空时大小写不敏感命中（"DeepSeek-V4-Flash" 命中 "deepseek-v4-flash"），
+// 未命中模型返回 1.0；model 为空（成本侧无模型上下文）时白名单不参与视为全模型。
+func TestUpstreamBillingRateAtWindowWhitelist(t *testing.T) {
+	base := map[string]any{
+		"billing_scope":            "token",
+		"resolved_rate_multiplier": 1.0,
+		"peak_rate_enabled":        true,
+		"timezone":                 "Asia/Shanghai",
+		"peak_windows": []any{
+			map[string]any{"start": "09:00", "end": "12:00", "multiplier": 2.0, "models": []any{"deepseek-v4-flash", "deepseek-*"}},
+			map[string]any{"start": "14:00", "end": "18:00", "multiplier": 3.0},
+		},
+	}
+	inWindow := time.Date(2026, time.July, 13, 2, 30, 0, 0, time.UTC)     // 10:30 上海
+	secondWindow := time.Date(2026, time.July, 13, 7, 30, 0, 0, time.UTC) // 15:30 上海
+
+	cases := []struct {
+		name  string
+		model string
+		at    time.Time
+		want  float64
+	}{
+		{"whitelist case-insensitive hit", "DeepSeek-V4-Flash", inWindow, 2.0},
+		{"whitelist wildcard case-insensitive hit", "DeepSeek-V4-PRO", inWindow, 2.0},
+		{"whitelist miss", "gpt-5.6", inWindow, 1.0},
+		{"empty model treats whitelist as all models", "", inWindow, 2.0},
+		{"second window no whitelist hits all", "gpt-5.6", secondWindow, 3.0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rate, ok := upstreamBillingRateAt(base, c.at, c.model)
+			require.True(t, ok)
+			require.Equal(t, c.want, rate)
+		})
+	}
+}
+
+// TestUpstreamBillingRateAtOverlappingWindowsRejected 账号侧重叠窗口整体拒绝
+// （倍率归属有歧义，与分组侧 ValidatePeakWindows 同语义），回退 legacy 单窗口解析。
+func TestUpstreamBillingRateAtOverlappingWindowsRejected(t *testing.T) {
+	data := map[string]any{
+		"billing_scope":            "token",
+		"resolved_rate_multiplier": 1.0,
+		"peak_rate_enabled":        true,
+		"timezone":                 "Asia/Shanghai",
+		"peak_start":               "14:00",
+		"peak_end":                 "18:00",
+		"peak_rate_multiplier":     2.0,
+		"peak_windows": []any{
+			map[string]any{"start": "09:00", "end": "12:00", "multiplier": 2.0},
+			map[string]any{"start": "11:00", "end": "15:00", "multiplier": 4.0}, // 与 09-12 重叠
+		},
+	}
+	// 15:30 上海（legacy 窗口内）：重叠 windows 被拒绝 → legacy 2.0
+	rate, ok := upstreamBillingRateAt(data, time.Date(2026, time.July, 13, 7, 30, 0, 0, time.UTC), "")
+	require.True(t, ok)
+	require.Equal(t, 2.0, rate)
+	// 10:30 上海（legacy 窗口外，重叠 windows 若生效会是 2.0/4.0）→ 1.0
+	rate, ok = upstreamBillingRateAt(data, time.Date(2026, time.July, 13, 2, 30, 0, 0, time.UTC), "")
+	require.True(t, ok)
+	require.Equal(t, 1.0, rate)
 }
 
 func TestUpstreamBillingProbeFailurePreservesLastSuccessAndRetryAfter(t *testing.T) {

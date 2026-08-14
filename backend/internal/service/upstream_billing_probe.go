@@ -832,7 +832,9 @@ func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
 		data["applied_peak_multiplier"] = *response.AppliedPeakMultiplier
 		data["timezone"] = *response.Timezone
 	}
-	appliedPeak, ok := upstreamBillingPeakMultiplierAt(data, observedAt)
+	// 探针响应无计费模型字段，白名单不参与判定（model=""，见函数头注释），
+	// 与上游声明的 applied_peak_multiplier 做模型无关的一致性校验。
+	appliedPeak, ok := upstreamBillingPeakMultiplierAt(data, observedAt, "")
 	if !ok {
 		return nil, fmt.Errorf("invalid peak billing response")
 	}
@@ -849,7 +851,10 @@ func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
 	return data, nil
 }
 
-func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
+// upstreamBillingRateAt 返回指定时刻的账号成本侧倍率（基础倍率 × 高峰因子）。
+// model 为计费模型名，透传给 upstreamBillingPeakMultiplierAt 用于窗口级模型白名单；
+// 调用方无模型上下文时传 ""（白名单不参与，视为全模型，见该函数注释）。
+func upstreamBillingRateAt(data map[string]any, now time.Time, model string) (float64, bool) {
 	if scope, _ := data["billing_scope"].(string); scope != "token" {
 		return 0, false
 	}
@@ -857,7 +862,7 @@ func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
 	if !ok || base < 0 || math.IsNaN(base) || math.IsInf(base, 0) {
 		return 0, false
 	}
-	appliedPeak, ok := upstreamBillingPeakMultiplierAt(data, now)
+	appliedPeak, ok := upstreamBillingPeakMultiplierAt(data, now, model)
 	if !ok {
 		return 0, false
 	}
@@ -899,7 +904,14 @@ func upstreamBillingProbeSyncRate(data map[string]any) (float64, bool) {
 	return rounded, true
 }
 
-func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float64, bool) {
+// upstreamBillingPeakMultiplierAt 按账号 extra 的高峰配置计算指定时刻的高峰因子。
+//   - model 为计费模型名：非空时窗口级模型白名单按大小写不敏感匹配（与分组侧
+//     matchModelPattern 同一归一）；为空（成本侧无模型上下文）时白名单不参与、
+//     视为全模型，避免对上游声明的 applied_peak_multiplier 误判 inconsistent。
+//   - 多窗口（peak_windows 非空）优先：窗口左闭右开 [start,end)，任一命中返回倍率，
+//     全未命中 1.0；无多窗口时回退 legacy 单窗口字段。
+//   - 配置非法（缺字段/时区未知/窗口脏）返回 ok=false，调用方按不可判定处理。
+func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time, model string) (float64, bool) {
 	peakEnabled, ok := data["peak_rate_enabled"].(bool)
 	if !ok {
 		return 0, false
@@ -921,13 +933,23 @@ func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float6
 
 	// 多窗口优先（DeepSeek 双窗口谷峰价，2026-08-14）：账号 extra 可选
 	// peak_windows，与分组侧同构 JSON [{start,end,multiplier,models}]。
-	// 窗口左闭右开 [start,end)，模型白名单在账号成本侧不参与判定（视为全模型）。
+	// 窗口左闭右开 [start,end)，模型白名单判定见函数头注释。
 	// 合法窗口存在时按多窗口判定，任一命中返回其倍率，全未命中 1.0。
 	if windows, windowOK := parseUpstreamPeakWindows(data["peak_windows"]); windowOK && len(windows) > 0 {
 		for _, w := range windows {
-			if minute >= w.start && minute < w.end {
-				return w.multiplier, true
+			if minute < w.start || minute >= w.end {
+				continue
 			}
+			// 窗口级模型白名单：model 非空时按大小写不敏感匹配（与分组侧
+			// matchModelPattern 同一归一，成本侧模型名与请求侧可能不同，
+			// "DeepSeek-V4-Flash" 必须命中白名单 "deepseek-v4-flash"）；
+			// model 为空（成本侧无模型上下文，如调度倍率/探针校验）时白名单
+			// 不参与判定、视为全模型——与探针响应校验的模型无关性保持一致，
+			// 避免对上游声明的 applied_peak_multiplier 误判 inconsistent。
+			if len(w.models) > 0 && model != "" && !modelMatchesAny(w.models, model) {
+				continue
+			}
+			return w.multiplier, true
 		}
 		return 1, true
 	}
@@ -951,12 +973,15 @@ func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float6
 type upstreamPeakWindowSpan struct {
 	start, end int
 	multiplier float64
+	models     []string // 窗口级模型白名单（trim/去空后），空 = 全模型
 }
 
 // parseUpstreamPeakWindows 解析账号 extra 的 peak_windows（同构 JSON
 // [{start:"09:00", end:"12:00", multiplier:2.0, models:[...]}]）。
-// 模型白名单字段忽略（账号成本侧按模型无法精确判定，白名单窗口视为全模型）。
-// raw 为 nil / 非数组 / 全部窗口非法时返回 ok=false（回退 legacy 单窗口解析）。
+// 模型白名单保留并清洗（trim/去空），匹配时按大小写不敏感判定（见
+// upstreamBillingPeakMultiplierAt）。窗口间重叠视为配置非法整体拒绝（与
+// 分组侧 ValidatePeakWindows 同语义：重叠窗口倍率归属有歧义）。
+// raw 为 nil / 非数组 / 全部窗口非法 / 存在重叠时返回 ok=false（回退 legacy 单窗口解析）。
 func parseUpstreamPeakWindows(raw any) ([]upstreamPeakWindowSpan, bool) {
 	if raw == nil {
 		return nil, false
@@ -966,9 +991,10 @@ func parseUpstreamPeakWindows(raw any) ([]upstreamPeakWindowSpan, bool) {
 		return nil, false
 	}
 	var windows []struct {
-		Start      string  `json:"start"`
-		End        string  `json:"end"`
-		Multiplier float64 `json:"multiplier"`
+		Start      string   `json:"start"`
+		End        string   `json:"end"`
+		Multiplier float64  `json:"multiplier"`
+		Models     []string `json:"models"`
 	}
 	if err := json.Unmarshal(buf, &windows); err != nil {
 		return nil, false
@@ -981,10 +1007,27 @@ func parseUpstreamPeakWindows(raw any) ([]upstreamPeakWindowSpan, bool) {
 			w.Multiplier < 0 || math.IsNaN(w.Multiplier) || math.IsInf(w.Multiplier, 0) {
 			continue // 脏窗口跳过（与分组侧 NormalizePeakWindows 同语义）
 		}
-		out = append(out, upstreamPeakWindowSpan{start: start, end: end, multiplier: w.Multiplier})
+		models := make([]string, 0, len(w.Models))
+		for _, m := range w.Models {
+			if trimmed := strings.TrimSpace(m); trimmed != "" {
+				models = append(models, trimmed)
+			}
+		}
+		out = append(out, upstreamPeakWindowSpan{start: start, end: end, multiplier: w.Multiplier, models: models})
 	}
 	if len(out) == 0 {
 		return nil, false
+	}
+	// 窗口间重叠校验（左闭右开 [a,b) 与 [c,d) 重叠 ⇔ a < d && c < b；
+	// 相邻 end == start 合法）。重叠时倍率归属有歧义，整体拒绝回退 legacy。
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			a, b := out[i].start, out[i].end
+			c, d := out[j].start, out[j].end
+			if a < d && c < b {
+				return nil, false
+			}
+		}
 	}
 	return out, true
 }
