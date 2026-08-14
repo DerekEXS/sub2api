@@ -228,6 +228,16 @@ export default {
     emptyNote: '每个用户将获得独立的容器环境，关闭后数据保留 7 天。',
     startError: '启动失败，请稍后重试',
     stopError: '关闭失败，请稍后重试',
+    agentInfoTitle: 'Agent 实例信息',
+    openGateway: '打开网关',
+    apiEndpoint: 'API 端点',
+    healthCheck: '健康检查',
+    quickStartTitle: '快速接入指引',
+    quickStartStep1: '在 Claude Code 或其他 OpenAI 兼容客户端中设置 API 端点为上方地址',
+    quickStartStep2: '使用您的云间 API Key 进行认证',
+    quickStartStep3: '选择 deepseek-v4-flash 模型开始对话',
+    healthOk: '网关在线',
+    healthChecking: '检测中...',
   },
 
   // Auth

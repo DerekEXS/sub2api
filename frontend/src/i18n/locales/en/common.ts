@@ -228,6 +228,16 @@ export default {
     emptyNote: 'Each user gets an isolated container. Data is retained for 7 days after shutdown.',
     startError: 'Failed to start, please retry later',
     stopError: 'Failed to stop, please retry later',
+    agentInfoTitle: 'Agent Instance Info',
+    openGateway: 'Open Gateway',
+    apiEndpoint: 'API Endpoint',
+    healthCheck: 'Health Check',
+    quickStartTitle: 'Quick Start Guide',
+    quickStartStep1: 'Set the API endpoint in Claude Code or any OpenAI-compatible client to the address above',
+    quickStartStep2: 'Authenticate with your CloudZone API key',
+    quickStartStep3: 'Select the deepseek-v4-flash model and start chatting',
+    healthOk: 'Gateway Online',
+    healthChecking: 'Checking...',
   },
 
   // Auth

@@ -16,17 +16,19 @@ import (
 )
 
 // ──────────────────────────────────────────────────────────────
-// AgentService — 用户「Agent 服务」生命周期管理
+// AgentService - 用户「Agent 服务」生命周期管理
 //
 // 每个用户最多一个实例（agents 表 UNIQUE(user_id)）：
-//   - StartAgent: 创建用户专属 API key（绑用户第一个可用分组）→ 调 NY agent-manager
-//     POST /v1/create（严格隔离容器）→ 写 agents 表。已有实例则返回现状态（幂等）。
+//   - StartAgent: 创建用户专属 API key（绑用户第一个可用分组）-> 调 NY agent-manager
+//     POST /v1/create（严格隔离容器）-> 写 agents 表。已有实例则返回现状态（幂等）。
+//     若 DB 中存在 orphaned 记录（上次 stop 失败遗留），先清理旧容器再创建新实例。
 //   - StopAgent: 调 agent-manager POST /v1/destroy（容器销毁、数据目录保留 7 天）
-//     → 吊销用户专属 key → 清 agents 表。
+//     -> 吊销用户专属 key -> 清 agents 表。
+//     destroy 失败时保留 DB 记录（status=orphaned）+ 不吊销 key，等下次重试。
 //   - GetAgentStatus: 读 agents 表 + agent-manager GET /v1/status 合并返回。
 //
 // 依赖均为接口（AgentManagerClient / AgentKeyProvisioner / AgentStore），
-// 单测用 mock/fake 覆盖生命周期（start/stop/status/重复 start 幂等）。
+// 单测用 mock/fake 覆盖生命周期（start/stop/status/重复 start 幂等/stop 失败保留记录）。
 // ──────────────────────────────────────────────────────────────
 
 // defaultAgentModel 是注入容器的默认模型。容器 base_url 指向云间API网关
@@ -53,13 +55,16 @@ type AgentKeyProvisioner interface {
 }
 
 // Agent 是 agents 表的一行（用户实例记录）。
+//
+// AgentKey 存储明文 API key（设计如此）：该 key 仅用于注入用户实例的 config.json，
+// destroy 时立即吊销（软删 deleted_at）。key 不出现在日志/备份/错误响应中。
 type Agent struct {
 	ID            int64
 	UserID        int64
 	ContainerName string
 	Port          int
-	Status        string
-	AgentKey      string
+	Status        string // running / stopped / orphaned
+	AgentKey      string // 明文存储，destroy 即吊销（见上方注释）
 	AgentKeyID    int64
 	CreatedAt     time.Time
 	LastActiveAt  time.Time
@@ -287,7 +292,7 @@ func NewAgentService(
 
 // AgentState 是返回给前端的实例状态（含 agent_url）。
 type AgentState struct {
-	Status    string `json:"status"`     // not_started / running / stopped / error
+	Status    string `json:"status"` // not_started / running / stopped / orphaned / error
 	Port      int    `json:"port,omitempty"`
 	AgentURL  string `json:"agent_url,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
@@ -297,7 +302,9 @@ func containerNameFor(userID int64) string {
 	return fmt.Sprintf("agent-%d", userID)
 }
 
-// StartAgent 启动用户 Agent 实例。已有实例时返回现状态（幂等，不重复创建 key/容器）。
+// StartAgent 启动用户 Agent 实例。
+//   - 已有 running 实例：返回现状态（幂等，不重复创建 key/容器）
+//   - 已有 orphaned 记录（上次 stop 失败遗留）：先清理旧容器+吊销旧 key，再创建新实例
 func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentState, error) {
 	if !s.cfg.Agent.IsConfigured() {
 		return nil, errors.New("agent service not configured (AGENT_MANAGER_URL / AGENT_MANAGER_TOKEN)")
@@ -308,8 +315,16 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 		return nil, err
 	}
 	if existing != nil {
-		// 幂等：已有实例直接返回现状态（不重复创建 key）
-		return s.stateFromRow(ctx, existing)
+		// orphaned 记录：上次 stop 失败遗留的孤儿容器，先清理再重建（MAJOR 2 对账）
+		if existing.Status == "orphaned" {
+			_ = s.manager.Destroy(ctx, existing.ContainerName) // best-effort 清理旧容器
+			_ = s.provision.Revoke(ctx, existing.AgentKeyID)   // 吊销旧 key
+			_ = s.store.DeleteByUser(ctx, userID)              // 清旧记录
+			// 继续往下创建新实例
+		} else {
+			// 幂等：已有实例直接返回现状态（不重复创建 key）
+			return s.stateFromRow(ctx, existing)
+		}
 	}
 
 	name := containerNameFor(userID)
@@ -350,35 +365,46 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 }
 
 // StopAgent 停止并销毁用户 Agent 实例（幂等：无实例时直接返回成功）。
+//
+// MAJOR 2 修复：destroy 失败时保留 DB 记录（status=orphaned）+ 保留 key 不吊销，
+// 返回错误给调用方。下次 StartAgent 时自动对账清理（见 StartAgent orphaned 分支）。
+// destroy 成功后才吊销 key + 清库。
 func (s *AgentService) StopAgent(ctx context.Context, userID int64) error {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
 	if existing == nil {
-		return nil
+		return nil // 幂等：无实例 = 成功
 	}
 
-	// 1. 销毁容器（manager 侧：rm -f + 数据目录保留 7 天）
+	// 1. 销毁容器（manager 侧：rm -f 重试 3 次 + 幂等 + 数据目录保留 7 天）
 	destroyErr := s.manager.Destroy(ctx, existing.ContainerName)
-	// 2. 吊销用户专属 key
-	revokeErr := s.provision.Revoke(ctx, existing.AgentKeyID)
-	// 3. 清库（无论上面成败，实例记录都要清除，避免卡死在半状态）
-	clearErr := s.store.DeleteByUser(ctx, userID)
-
 	if destroyErr != nil {
-		return fmt.Errorf("stop agent: destroy: %w", destroyErr)
+		// MAJOR 2: destroy 失败 -> 保留 DB 记录为 orphaned + 保留 key
+		// 下次 StartAgent 自动对账（清理旧容器 -> 创建新实例）
+		existing.Status = "orphaned"
+		_ = s.store.Upsert(ctx, existing)
+		return fmt.Errorf("stop agent: destroy failed (record preserved for retry): %w", destroyErr)
 	}
-	if revokeErr != nil {
-		return fmt.Errorf("stop agent: revoke key: %w", revokeErr)
+
+	// 2. destroy 成功：吊销用户专属 key
+	if err := s.provision.Revoke(ctx, existing.AgentKeyID); err != nil {
+		// key 吊销失败不阻塞清库（容器已销毁，key 可后续手动清理）
+		// 但记录为 orphaned 以提醒有人工介入
+		existing.Status = "orphaned"
+		_ = s.store.Upsert(ctx, existing)
+		return fmt.Errorf("stop agent: revoke key failed (container destroyed): %w", err)
 	}
-	if clearErr != nil {
-		return fmt.Errorf("stop agent: clear: %w", clearErr)
+
+	// 3. 清库
+	if err := s.store.DeleteByUser(ctx, userID); err != nil {
+		return fmt.Errorf("stop agent: clear: %w", err)
 	}
 	return nil
 }
 
-// GetAgentStatus 返回用户实例当前状态（无实例 → not_started）。
+// GetAgentStatus 返回用户实例当前状态（无实例 -> not_started）。
 func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*AgentState, error) {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
@@ -398,6 +424,12 @@ func (s *AgentService) stateFromRow(ctx context.Context, a *Agent) (*AgentState,
 		AgentURL:  s.agentURL(a.Port),
 		CreatedAt: a.CreatedAt.Format(time.RFC3339),
 	}
+
+	// orphaned 状态优先返回 DB 记录（manager 可能也不可达）
+	if a.Status == "orphaned" {
+		return state, nil
+	}
+
 	mgr, err := s.manager.Status(ctx, a.ContainerName)
 	if err != nil {
 		// manager 不可达不算致命：保留库内状态

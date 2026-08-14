@@ -38,24 +38,73 @@
         </div>
       </div>
 
-      <!-- Agent UI Frame -->
+      <!-- Agent UI: iframe (if gateway has HTML) or status panel (fallback) -->
       <div v-if="agentUrl && agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4">
-        <div class="flex justify-between items-center mb-3">
-          <h3 class="text-lg font-medium">{{ t('agentService.agentUiTitle') }}</h3>
-          <a
-            :href="agentUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm"
-          >
-            {{ t('agentService.openInNewWindow') }}
-          </a>
-        </div>
-        <iframe
-          :src="agentUrl"
-          class="w-full h-[600px] border rounded-md"
-          title="PicoClaw Agent"
-        ></iframe>
+        <!-- Has Web UI: show iframe -->
+        <template v-if="hasWebUI">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-lg font-medium">{{ t('agentService.agentUiTitle') }}</h3>
+            <a
+              :href="agentUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm"
+            >
+              {{ t('agentService.openInNewWindow') }}
+            </a>
+          </div>
+          <iframe
+            :src="agentUrl"
+            class="w-full h-[600px] border rounded-md"
+            title="PicoClaw Agent"
+          ></iframe>
+        </template>
+
+        <!-- No Web UI: show status panel with connection info -->
+        <template v-else>
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-lg font-medium">{{ t('agentService.agentInfoTitle') }}</h3>
+            <a
+              :href="agentUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm"
+            >
+              {{ t('agentService.openGateway') }}
+            </a>
+          </div>
+          <div class="space-y-4">
+            <!-- Connection Info -->
+            <div class="bg-gray-50 dark:bg-dark-700 rounded-md p-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.apiEndpoint') }}</div>
+                  <code class="text-sm font-mono break-all">{{ agentUrl }}</code>
+                </div>
+                <div>
+                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.healthCheck') }}</div>
+                  <code class="text-sm font-mono break-all">{{ agentUrl }}/health</code>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Start Guide -->
+            <div class="bg-blue-50 dark:bg-blue-900/20 rounded-md p-4">
+              <h4 class="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">{{ t('agentService.quickStartTitle') }}</h4>
+              <ol class="list-decimal list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                <li>{{ t('agentService.quickStartStep1') }}</li>
+                <li>{{ t('agentService.quickStartStep2') }}</li>
+                <li>{{ t('agentService.quickStartStep3') }}</li>
+              </ol>
+            </div>
+
+            <!-- Health Status -->
+            <div class="flex items-center gap-2 text-sm">
+              <span v-if="healthOk" class="text-green-600 dark:text-green-400">✓ {{ t('agentService.healthOk') }}</span>
+              <span v-else class="text-yellow-600 dark:text-yellow-400">⚪ {{ t('agentService.healthChecking') }}</span>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- Empty State -->
@@ -70,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAPI } from '@/api/agent'
 
@@ -80,7 +129,10 @@ type AgentUiStatus = 'not_started' | 'starting' | 'running' | 'stopping' | 'erro
 
 const agentStatus = ref<AgentUiStatus>('not_started')
 const agentUrl = ref('')
+const agentPort = ref(0)
 const errorMessage = ref('')
+const hasWebUI = ref(false)
+const healthOk = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const statusText = computed(() => {
@@ -122,6 +174,26 @@ const stopPolling = () => {
   }
 }
 
+/**
+ * 探测网关是否有 HTML 响应（PicoClaw gateway 无内嵌 Web UI，根路径返回 JSON/404）。
+ * 如果不是 HTML，前端显示状态面板+接入指引替代空白 iframe。
+ */
+const probeWebUI = async (url: string) => {
+  if (!url) {
+    hasWebUI.value = false
+    return
+  }
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    const ct = resp.headers.get('content-type') || ''
+    hasWebUI.value = ct.includes('text/html')
+    healthOk.value = resp.ok || resp.status === 404 // 404 说明网关在线但没有根页面
+  } catch {
+    hasWebUI.value = false
+    healthOk.value = false
+  }
+}
+
 const startPolling = () => {
   stopPolling()
   pollTimer = setInterval(async () => {
@@ -130,9 +202,11 @@ const startPolling = () => {
       if (state.status === 'running') {
         agentStatus.value = 'running'
         agentUrl.value = state.agent_url || ''
+        agentPort.value = state.port || 0
       } else if (state.status === 'stopped' || state.status === 'not_started') {
         agentStatus.value = 'not_started'
         agentUrl.value = ''
+        agentPort.value = 0
         stopPolling()
       }
     } catch {
@@ -147,6 +221,8 @@ const syncStatus = async () => {
     if (state.status === 'running') {
       agentStatus.value = 'running'
       agentUrl.value = state.agent_url || ''
+      agentPort.value = state.port || 0
+      await probeWebUI(state.agent_url || '')
       startPolling()
     } else if (state.status === 'stopped') {
       agentStatus.value = 'not_started'
@@ -170,6 +246,8 @@ const startAgent = async () => {
     if (state.status === 'running') {
       agentStatus.value = 'running'
       agentUrl.value = state.agent_url || ''
+      agentPort.value = state.port || 0
+      await probeWebUI(state.agent_url || '')
       startPolling()
     } else {
       agentStatus.value = 'not_started'
@@ -191,6 +269,9 @@ const stopAgent = async () => {
     await agentAPI.stop()
     agentStatus.value = 'not_started'
     agentUrl.value = ''
+    agentPort.value = 0
+    hasWebUI.value = false
+    healthOk.value = false
     stopPolling()
   } catch (error: any) {
     console.error('Failed to stop agent:', error)
@@ -198,6 +279,13 @@ const stopAgent = async () => {
     errorMessage.value = error?.message || t('agentService.stopError')
   }
 }
+
+// 当 agentUrl 变化时重新探测
+watch(agentUrl, (url) => {
+  if (url && agentStatus.value === 'running') {
+    probeWebUI(url)
+  }
+})
 
 onMounted(() => {
   syncStatus()
