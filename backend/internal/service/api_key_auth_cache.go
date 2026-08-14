@@ -119,6 +119,9 @@ type APIKeyAuthGroupSnapshot struct {
 	PeakStart          string  `json:"peak_start"`
 	PeakEnd            string  `json:"peak_end"`
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
+	// 多窗口高峰倍率（DeepSeek 双窗口谷峰价），必须随快照缓存，否则扣费路径
+	// 拿到的 apiKey.Group 缺字段、多窗口高峰倍率失效（降级为旧单窗口/1.0）。
+	PeakWindows []PeakWindow `json:"peak_windows,omitempty"`
 
 	// 分组利润控制：调度准入门在直连热路径上读的就是这份快照——门解析
 	// （resolveOpenAIProfitControlGate / resolveProfitControlGroup）优先取

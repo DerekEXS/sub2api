@@ -102,7 +102,8 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 			report.RemainingByModelMinD[model] = 0
 		}
 
-		peak := group.PeakMultiplierAt(evalAt)
+		// 预览为分组级推演，无单模型上下文：模型白名单窗口按全模型口径（空模型名）判定。
+		peak := group.PeakMultiplierAt(evalAt, "")
 		defaultD := group.RateMultiplier * peak
 		minRate := group.RateMultiplier
 		for _, override := range in.UserOverrides {

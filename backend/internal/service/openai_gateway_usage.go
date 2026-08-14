@@ -172,16 +172,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if apiKey.GroupID != nil && apiKey.Group != nil {
 		multiplier = s.ResolveUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
-	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。
-	// 高峰因子按请求级 PricingAt 现算（与利润门 D 同源同刻，跨峰谷请求不中途
-	// 变价）；未装配 PricingAt 的路径回退记录时刻，保持既有行为。不并入上面的
-	// Resolve，以免污染 user:group 倍率缓存。
-	baseMultiplier := multiplier
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, openAIUsagePricingAt(input))
-	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
-
-	var cost *CostBreakdown
-	var err error
+	// 确定计费模型（先于高峰因子计算：窗口级模型白名单需要按计费模型判定）
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	if result.BillingModel != "" {
 		billingModel = strings.TrimSpace(result.BillingModel)
@@ -192,6 +183,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
 		billingModel = input.OriginalModel
 	}
+	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。
+	// 高峰因子按请求级 PricingAt 现算（与利润门 D 同源同刻，跨峰谷请求不中途
+	// 变价）；未装配 PricingAt 的路径回退记录时刻，保持既有行为。不并入上面的
+	// Resolve，以免污染 user:group 倍率缓存。
+	baseMultiplier := multiplier
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, openAIUsagePricingAt(input), billingModel)
+	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+
+	var cost *CostBreakdown
+	var err error
 	billingModels := usageBillingModelCandidates(
 		billingModel,
 		result.BillingModel,

@@ -14,6 +14,7 @@ import (
 type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfig
 type GroupModelsListConfig = domain.GroupModelsListConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
+type PeakWindow = domain.PeakWindow
 
 type Group struct {
 	ID             int64
@@ -27,9 +28,13 @@ type Group struct {
 	PeakStart          string
 	PeakEnd            string
 	PeakRateMultiplier float64
-	IsExclusive        bool
-	Status             string
-	Hydrated           bool // indicates the group was loaded from a trusted repository source
+	// 多窗口高峰倍率（DeepSeek 双窗口谷峰价）：[{start,end,multiplier,models}]。
+	// 非空时优先于旧单窗口 4 字段；窗口左闭右开 [start,end)、窗口级模型白名单
+	// （空 = 组内全部模型命中，支持 * 通配符）。详见 PeakMultiplierAt。
+	PeakWindows []PeakWindow
+	IsExclusive bool
+	Status      string
+	Hydrated    bool // indicates the group was loaded from a trusted repository source
 	// DuplicateOperationID is internal persistence metadata used only to recover
 	// an already committed one-click copy. It must never be mapped to API DTOs.
 	DuplicateOperationID string
@@ -292,14 +297,25 @@ func parseMinutes(hhmm string) (int, bool) {
 	return h*60 + m, true
 }
 
-// PeakMultiplierAt 返回指定时刻 now 的高峰因子。
-//   - 未启用 / 未配置 / 配置非法（start>=end 或格式错误） / 非高峰时段 → 返回 1.0（安全降级）
-//   - 区间为左闭右开 [PeakStart, PeakEnd)，仅支持当日区间，不支持跨天（如 22:00-次日02:00）
-//   - 时刻基于全局系统时区（timezone.Location）判定
+// PeakMultiplierAt 返回指定时刻 now、指定计费模型 model 的高峰因子。
+//   - 未启用 / 未配置 / 配置非法 / 非高峰时段 / 模型不在白名单 → 返回 1.0（安全降级）
+//   - 多窗口（PeakWindows 非空）优先：遍历窗口，命中（时区 = timezone.Location，
+//     左闭右开 [start,end)）且模型白名单命中（空 = 全模型）→ 返回该窗口倍率；
+//     所有窗口均未命中 → 1.0。窗口间重叠已在校验层禁止，遍历序不影响结果。
+//   - 无多窗口时兼容旧单窗口字段：区间为左闭右开 [PeakStart, PeakEnd)，
+//     仅支持当日区间，不支持跨天（如 22:00-次日02:00）
+//   - 订阅类型限制已放开：standard 与 subscription 分组均可生效（DeepSeek 谷峰价需求）
+//   - model 为空字符串时：仅命中模型白名单为空（全模型）的窗口，避免误伤
 //
 // 该方法是纯函数，不读取任何外部状态，便于单测。
-func (g *Group) PeakMultiplierAt(now time.Time) float64 {
-	if g == nil || !g.IsSubscriptionType() || !g.PeakRateEnabled || g.PeakStart == "" || g.PeakEnd == "" {
+func (g *Group) PeakMultiplierAt(now time.Time, model string) float64 {
+	if g == nil || !g.PeakRateEnabled {
+		return 1.0
+	}
+	if len(g.PeakWindows) > 0 {
+		return g.peakMultiplierAtWindows(now, model)
+	}
+	if g.PeakStart == "" || g.PeakEnd == "" {
 		return 1.0
 	}
 	start, ok1 := parseMinutes(g.PeakStart)
@@ -315,19 +331,61 @@ func (g *Group) PeakMultiplierAt(now time.Time) float64 {
 	return 1.0
 }
 
+// peakMultiplierAtWindows 多窗口高峰命中判定：时区 = timezone.Location，
+// 窗口左闭右开 [start,end)；命中后还需过窗口级模型白名单（空 = 全模型，
+// 非空 = 仅白名单内模型，支持 * 通配符后缀）。脏窗口（格式非法/end<=start/
+// 负倍率）安全跳过，与单窗口路径的降级语义一致。
+func (g *Group) peakMultiplierAtWindows(now time.Time, model string) float64 {
+	t := now.In(timezone.Location())
+	cur := t.Hour()*60 + t.Minute()
+	for _, w := range g.PeakWindows {
+		start, ok1 := parseMinutes(w.Start)
+		end, ok2 := parseMinutes(w.End)
+		if !ok1 || !ok2 || start >= end || w.Multiplier < 0 {
+			continue // 脏窗口安全跳过
+		}
+		if cur < start || cur >= end {
+			continue
+		}
+		if len(w.Models) > 0 && !modelMatchesAny(w.Models, model) {
+			continue
+		}
+		return w.Multiplier
+	}
+	return 1.0
+}
+
+// modelMatchesAny 判断 model 是否命中白名单任一模式（支持 * 通配符后缀）。
+// model 为空时仅空白名单（len==0）在调用方已被放行，这里只处理非空白名单，
+// 空 model 与任何非空模式（含 "*"）均不匹配。
+func modelMatchesAny(patterns []string, model string) bool {
+	if model == "" {
+		return false
+	}
+	for _, p := range patterns {
+		if matchModelPattern(p, model) {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidatePeakRateConfig 是高峰倍率配置的唯一校验来源，供 handler 与 service 层共用。
-// enabled=true 时仅允许订阅类型分组；并要求 start/end 合法且 end>start（不支持跨天），multiplier>=0。
-// multiplier=0 是允许的，表示高峰 token 请求按 0 倍计费，可用于折扣/免费策略。
-// enabled=false 时放行（不关心类型）。subscriptionType 为空按 standard 处理。
-func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64) error {
+//   - 订阅类型限制已放开：standard 与 subscription 分组均可配置（DeepSeek 谷峰价需求）；
+//   - 多窗口（windows 非空）优先：委托 ValidatePeakWindows 校验（HH:MM 格式、end>start、
+//     窗口间无重叠、multiplier>=0），legacy 单窗口字段可同时携带但不参与判定；
+//   - 无多窗口时校验 legacy 单窗口：start/end 必填且合法（end>start，不支持跨天），multiplier>=0；
+//   - multiplier=0 是允许的，表示高峰 token 请求按 0 倍计费，可用于折扣/免费策略；
+//   - enabled=false 时放行（不关心类型与内容）。
+func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64, windows []PeakWindow) error {
 	if !enabled {
 		return nil
 	}
-	if subscriptionType != SubscriptionTypeSubscription {
-		return errors.New("高峰时段倍率仅支持订阅类型分组")
+	if len(windows) > 0 {
+		return ValidatePeakWindows(windows)
 	}
 	if start == "" || end == "" {
-		return errors.New("peak_rate_enabled 为 true 时 peak_start 与 peak_end 必填")
+		return errors.New("peak_rate_enabled 为 true 时 peak_start 与 peak_end 必填（或提供 peak_windows）")
 	}
 	st, okStart := parseMinutes(start)
 	if !okStart {
@@ -346,18 +404,63 @@ func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end st
 	return nil
 }
 
-// NormalizePeakRateConfig 归一化最终落库的高峰配置，CreateGroup 与 UpdateGroup 两条写路径共用（唯一收口）：
-//   - 非订阅类型分组不携带任何高峰配置，一律清空（enabled=false、窗口置空、倍率归 1.0）；
-//   - 订阅分组关闭高峰时保留已配置的合法窗口（便于临时停用后再启用），
+// ValidatePeakWindows 校验多窗口高峰配置列表：
+//   - 每个窗口 start/end 均为 HH:MM（与 parseMinutes 接受集一致）且 end > start（不支持跨天）
+//   - 每个窗口 multiplier >= 0（0 允许，表示高峰免费；NaN/Inf 拒绝）
+//   - 每个窗口 models 白名单条目非空（空列表 = 全模型合法）
+//   - 窗口间不允许重叠（左闭右开 [a,b) 与 [c,d) 重叠 ⇔ a < d && c < b；
+//     相邻窗口 end == start 不算重叠，如 09:00-12:00 与 12:00-14:00 合法）
+func ValidatePeakWindows(windows []PeakWindow) error {
+	type windowSpan struct {
+		start, end int
+	}
+	spans := make([]windowSpan, 0, len(windows))
+	for _, w := range windows {
+		start, okStart := parseMinutes(w.Start)
+		if !okStart {
+			return fmt.Errorf("peak_windows[].start 格式应为 HH:MM，got %q", w.Start)
+		}
+		end, okEnd := parseMinutes(w.End)
+		if !okEnd {
+			return fmt.Errorf("peak_windows[].end 格式应为 HH:MM，got %q", w.End)
+		}
+		if start >= end {
+			return fmt.Errorf("peak_windows[].end 必须大于 start（got %s-%s，不支持跨天区间）", w.Start, w.End)
+		}
+		if math.IsNaN(w.Multiplier) || math.IsInf(w.Multiplier, 0) {
+			return fmt.Errorf("peak_windows[].multiplier 非法：%v", w.Multiplier)
+		}
+		if w.Multiplier < 0 {
+			return fmt.Errorf("peak_windows[].multiplier 不能为负：%v", w.Multiplier)
+		}
+		for _, m := range w.Models {
+			if strings.TrimSpace(m) == "" {
+				return errors.New("peak_windows[].models 不能包含空模型名")
+			}
+		}
+		spans = append(spans, windowSpan{start: start, end: end})
+	}
+	for i := 0; i < len(spans); i++ {
+		for j := i + 1; j < len(spans); j++ {
+			a, b := spans[i].start, spans[i].end
+			c, d := spans[j].start, spans[j].end
+			if a < d && c < b {
+				return fmt.Errorf("peak_windows 窗口 %02d:%02d-%02d:%02d 与 %02d:%02d-%02d:%02d 重叠",
+					a/60, a%60, b/60, b%60, c/60, c%60, d/60, d%60)
+			}
+		}
+	}
+	return nil
+}
+
+// NormalizePeakRateConfig 归一化最终落库的单窗口高峰配置，CreateGroup 与 UpdateGroup 两条写路径共用（唯一收口）：
+//   - 订阅类型限制已放开：不再按 subscriptionType 清空配置（standard 分组可携带高峰配置）；
+//   - 关闭高峰时保留已配置的合法窗口（便于临时停用后再启用），
 //     但清掉无法解析的脏字符串与负倍率，避免脏数据入库。
 //
 // 与 ValidatePeakRateConfig 的分工：enabled=true 时校验已保证各字段合法，本函数为无操作；
-// enabled=false 时校验放行，由本函数兜底清洗。调用顺序为先归一化、后校验，
-// 使"订阅转标准"这类更新能静默清空高峰配置而不是被校验拒绝。
+// enabled=false 时校验放行，由本函数兜底清洗。调用顺序为先归一化、后校验。
 func NormalizePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64) (bool, string, string, float64) {
-	if subscriptionType != SubscriptionTypeSubscription {
-		return false, "", "", 1.0
-	}
 	if !enabled {
 		if _, ok := parseMinutes(start); !ok {
 			start = ""
@@ -372,15 +475,46 @@ func NormalizePeakRateConfig(subscriptionType string, enabled bool, start, end s
 	return enabled, start, end, multiplier
 }
 
+// NormalizePeakWindows 归一化多窗口高峰配置：丢弃脏窗口（时间格式非法、
+// end<=start、倍率为负/NaN/Inf）并清洗模型白名单（去空条目、trim），
+// 与单窗口路径的清洗语义一致。enabled=false 时窗口保留但暂不生效。
+func NormalizePeakWindows(windows []PeakWindow) []PeakWindow {
+	if len(windows) == 0 {
+		return nil
+	}
+	out := make([]PeakWindow, 0, len(windows))
+	for _, w := range windows {
+		start, okStart := parseMinutes(w.Start)
+		end, okEnd := parseMinutes(w.End)
+		if !okStart || !okEnd || start >= end ||
+			math.IsNaN(w.Multiplier) || math.IsInf(w.Multiplier, 0) || w.Multiplier < 0 {
+			continue // 脏窗口丢弃
+		}
+		models := make([]string, 0, len(w.Models))
+		for _, m := range w.Models {
+			if trimmed := strings.TrimSpace(m); trimmed != "" {
+				models = append(models, trimmed)
+			}
+		}
+		w.Models = models
+		out = append(out, w)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // computePeakAwareMultipliers 把"基础 token 倍率 base"（已含系统/分组/用户级倍率，但不含高峰）
 // 拆分为最终 token 倍率与图片按次倍率：图片按次倍率基于 base 现算、不受高峰影响；token 倍率在 base 上叠加高峰因子。
+// model 为本次请求的计费模型名，透传给 PeakMultiplierAt 用于窗口级模型白名单判定。
 // gateway_service.recordUsageCore 与 openai_gateway_service.RecordUsage 共用此函数，
 // 锁死"高峰因子只乘入 token 倍率、图片按次倍率不受影响"这一叠加顺序——任何调换都会被 group_peak_rate_test 覆盖。
-func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time) (text, image float64) {
+func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time, model string) (text, image float64) {
 	image = resolveImageRateMultiplier(apiKey, base)
 	peak := 1.0
 	if apiKey != nil && apiKey.Group != nil {
-		peak = apiKey.Group.PeakMultiplierAt(now)
+		peak = apiKey.Group.PeakMultiplierAt(now, model)
 	}
 	text = base * peak
 	return

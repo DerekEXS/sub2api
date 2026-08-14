@@ -120,6 +120,7 @@ type CreateGroupRequest struct {
 	PeakStart                       string                        `json:"peak_start"`
 	PeakEnd                         string                        `json:"peak_end"`
 	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
+	PeakWindows                     []service.PeakWindow          `json:"peak_windows,omitempty"`
 	ProfitControlEnabled            bool                          `json:"profit_control_enabled"`
 	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
 	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
@@ -189,6 +190,7 @@ type UpdateGroupRequest struct {
 	PeakStart                       *string                       `json:"peak_start"`
 	PeakEnd                         *string                       `json:"peak_end"`
 	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
+	PeakWindows                     *[]service.PeakWindow         `json:"peak_windows,omitempty"`
 	ProfitControlEnabled            *bool                         `json:"profit_control_enabled"`
 	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
 	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
@@ -490,7 +492,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if err := service.ValidatePeakRateConfig(req.SubscriptionType, req.PeakRateEnabled, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0)); err != nil {
+	if err := service.ValidatePeakRateConfig(req.SubscriptionType, req.PeakRateEnabled, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0), req.PeakWindows); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
@@ -526,6 +528,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		PeakStart:                       req.PeakStart,
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
+		PeakWindows:                     req.PeakWindows,
 		ProfitControlEnabled:            req.ProfitControlEnabled,
 		ProfitMinMargin:                 req.ProfitMinMargin,
 		ProfitSafetyBuffer:              req.ProfitSafetyBuffer,
@@ -655,6 +658,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		PeakStart:                       req.PeakStart,
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
+		PeakWindows:                     req.PeakWindows,
 		ProfitControlEnabled:            req.ProfitControlEnabled,
 		ProfitMinMargin:                 req.ProfitMinMargin,
 		ProfitSafetyBuffer:              req.ProfitSafetyBuffer,

@@ -63,6 +63,16 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0).
 			Comment("高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入文本倍率"),
+		// 多窗口高峰倍率（added by migration 159）：
+		// [{start:"09:00", end:"12:00", multiplier:2.0, models:[]}, ...]
+		// 窗口左闭右开 [start, end)，仅支持当日区间；models 为窗口级模型白名单
+		// （空 = 组内全部模型命中，支持 * 通配符）。peak_windows 非空时优先于
+		// 旧单窗口 4 字段（peak_rate_enabled/peak_start/peak_end/peak_rate_multiplier），
+		// 兼容存量数据。窗口间不允许重叠（校验层拒绝）。
+		field.JSON("peak_windows", []domain.PeakWindow{}).
+			Optional().
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("多窗口高峰倍率配置 [{start,end,multiplier,models}]，非空时优先于旧单窗口字段"),
 		field.Bool("is_exclusive").
 			Default(false),
 		field.String("status").

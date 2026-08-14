@@ -543,6 +543,15 @@ export interface ReasoningEffortMapping {
   to: string
 }
 
+// 分组多窗口高峰倍率的单窗口（groups.peak_windows JSONB 元素）。
+// 左闭右开 [start, end) 当日区间；models 为空 = 组内全部模型命中，支持 * 通配符。
+export interface PeakWindow {
+  start: string
+  end: string
+  multiplier: number
+  models?: string[]
+}
+
 export interface Group {
   id: number
   name: string
@@ -588,6 +597,8 @@ export interface Group {
   peak_start: string
   peak_end: string
   peak_rate_multiplier: number
+  // 多窗口高峰倍率（DeepSeek 双窗口谷峰价）；非空时优先于旧单窗口字段
+  peak_windows?: PeakWindow[]
   // Claude Code 客户端限制
   claude_code_only: boolean
   fallback_group_id: number | null
@@ -794,6 +805,7 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  peak_windows?: PeakWindow[]
   // 分组利润控制（五个 token 平台；margin/buffer 为小数）
   profit_control_enabled?: boolean
   profit_min_margin?: number
@@ -856,6 +868,7 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  peak_windows?: PeakWindow[]
   // 分组利润控制（五个 token 平台；margin/buffer 为小数）
   profit_control_enabled?: boolean
   profit_min_margin?: number

@@ -1144,8 +1144,8 @@
           </div>
         </div>
 
-        <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="createForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <!-- 高峰时段倍率配置（多窗口，standard/subscription 均可） -->
+        <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -1156,38 +1156,69 @@
               <span>{{ t("admin.groups.peakRate.enable") }}</span>
             </label>
           </div>
-          <div
-            v-if="createForm.peak_rate_enabled"
-            class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
-          >
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
-              <input
-                v-model="createForm.peak_start"
-                type="time"
-                class="input"
-              />
+          <div v-if="createForm.peak_rate_enabled" class="mb-4 space-y-3">
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.peakRate.multiWindowHint") }}
+            </p>
+            <div
+              v-for="(row, idx) in createForm.peak_windows"
+              :key="row.id"
+              class="rounded-lg bg-gray-50 p-3 dark:bg-gray-800"
+            >
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                  <input
+                    v-model="row.start"
+                    type="time"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                  <input
+                    v-model="row.end"
+                    type="time"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                  <input
+                    v-model.number="row.multiplier"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    placeholder="1"
+                    :title="t('admin.groups.peakRate.multiplierHint')"
+                  />
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="input-label">{{ t("admin.groups.peakRate.modelsWhitelist") }}</label>
+                  <input
+                    v-model="row.models"
+                    type="text"
+                    class="input"
+                    :placeholder="t('admin.groups.peakRate.modelsWhitelistPlaceholder')"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                class="mt-2 text-xs text-red-500 hover:text-red-700"
+                @click="createForm.peak_windows.splice(idx, 1)"
+              >
+                {{ t("admin.groups.peakRate.removeWindow") }}
+              </button>
             </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
-              <input
-                v-model="createForm.peak_end"
-                type="time"
-                class="input"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
-              <input
-                v-model.number="createForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                placeholder="1"
-                :title="t('admin.groups.peakRate.multiplierHint')"
-              />
-            </div>
+            <button
+              type="button"
+              class="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+              @click="createForm.peak_windows.push(createPeakWindowRow())"
+            >
+              {{ t("admin.groups.peakRate.addWindow") }}
+            </button>
           </div>
         </div>
 
@@ -2870,8 +2901,8 @@
           </div>
         </div>
 
-        <!-- 高峰时段倍率配置（仅订阅类型分组） -->
-        <div v-if="editForm.subscription_type === 'subscription'" class="border-t pt-4">
+        <!-- 高峰时段倍率配置（多窗口，standard/subscription 均可） -->
+        <div class="border-t pt-4">
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
@@ -2882,38 +2913,69 @@
               <span>{{ t("admin.groups.peakRate.enable") }}</span>
             </label>
           </div>
-          <div
-            v-if="editForm.peak_rate_enabled"
-            class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
-          >
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
-              <input
-                v-model="editForm.peak_start"
-                type="time"
-                class="input"
-              />
+          <div v-if="editForm.peak_rate_enabled" class="mb-4 space-y-3">
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.peakRate.multiWindowHint") }}
+            </p>
+            <div
+              v-for="(row, idx) in editForm.peak_windows"
+              :key="row.id"
+              class="rounded-lg bg-gray-50 p-3 dark:bg-gray-800"
+            >
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                  <input
+                    v-model="row.start"
+                    type="time"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                  <input
+                    v-model="row.end"
+                    type="time"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                  <input
+                    v-model.number="row.multiplier"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    placeholder="1"
+                    :title="t('admin.groups.peakRate.multiplierHint')"
+                  />
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="input-label">{{ t("admin.groups.peakRate.modelsWhitelist") }}</label>
+                  <input
+                    v-model="row.models"
+                    type="text"
+                    class="input"
+                    :placeholder="t('admin.groups.peakRate.modelsWhitelistPlaceholder')"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                class="mt-2 text-xs text-red-500 hover:text-red-700"
+                @click="editForm.peak_windows.splice(idx, 1)"
+              >
+                {{ t("admin.groups.peakRate.removeWindow") }}
+              </button>
             </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
-              <input
-                v-model="editForm.peak_end"
-                type="time"
-                class="input"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
-              <input
-                v-model.number="editForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
-                min="0"
-                class="input"
-                placeholder="1"
-                :title="t('admin.groups.peakRate.multiplierHint')"
-              />
-            </div>
+            <button
+              type="button"
+              class="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+              @click="editForm.peak_windows.push(createPeakWindowRow())"
+            >
+              {{ t("admin.groups.peakRate.addWindow") }}
+            </button>
           </div>
         </div>
 
@@ -4477,6 +4539,12 @@ import {
   serializeVideoModelPrices,
   videoModelPriceFamilyRows,
 } from "./groupsVideoModelPricing";
+import {
+  createPeakWindowRow,
+  rowsFromPeakWindows,
+  serializePeakWindows,
+  type PeakWindowRow,
+} from "./groupsPeakWindows";
 
 const emptyGroupPricing = (): PricingFormEntry => ({
   models: [],
@@ -5046,6 +5114,8 @@ const createForm = reactive({
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
+  // 多窗口高峰倍率（DeepSeek 双窗口谷峰价）：窗口列表，非空时优先于旧单窗口字段
+  peak_windows: [] as PeakWindowRow[],
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
@@ -5407,6 +5477,8 @@ const editForm = reactive({
   peak_start: "",
   peak_end: "",
   peak_rate_multiplier: 1.0,
+  // 多窗口高峰倍率（DeepSeek 双窗口谷峰价）：窗口列表，非空时优先于旧单窗口字段
+  peak_windows: [] as PeakWindowRow[],
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
@@ -5456,6 +5528,7 @@ type ImagePricingFormState = {
   peak_start: string;
   peak_end: string;
   peak_rate_multiplier: number;
+  peak_windows: PeakWindowRow[];
 };
 
 type VideoPricingFormState = {
@@ -5862,6 +5935,7 @@ const closeCreateModal = () => {
   createForm.peak_start = "";
   createForm.peak_end = "";
   createForm.peak_rate_multiplier = 1.0;
+  createForm.peak_windows = [];
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
   createForm.profit_safety_buffer_percent = 0;
@@ -6047,6 +6121,7 @@ const handleCreateGroup = async () => {
     requestData.peak_rate_multiplier = normalizeRateMultiplier(
       createForm.peak_rate_multiplier,
     );
+    requestData.peak_windows = serializePeakWindows(createForm.peak_windows);
     await adminAPI.groups.create(requestData);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -6109,6 +6184,12 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.peak_start = group.peak_start ?? "";
   editForm.peak_end = group.peak_end ?? "";
   editForm.peak_rate_multiplier = group.peak_rate_multiplier ?? 1.0;
+  // 多窗口：API 有 peak_windows 直接用；存量旧单窗口配置迁移为一行（legacy 兜底）
+  editForm.peak_windows = rowsFromPeakWindows(group.peak_windows, {
+    start: editForm.peak_start,
+    end: editForm.peak_end,
+    multiplier: editForm.peak_rate_multiplier,
+  });
   editForm.profit_control_enabled = group.profit_control_enabled ?? false;
   editForm.profit_min_margin_percent = decimalToPercent(
     group.profit_min_margin ?? 0,
@@ -6176,6 +6257,7 @@ const closeEditModal = () => {
   editForm.peak_start = "";
   editForm.peak_end = "";
   editForm.peak_rate_multiplier = 1.0;
+  editForm.peak_windows = [];
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
   editForm.profit_safety_buffer_percent = 0;
@@ -6322,6 +6404,7 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
+    payload.peak_windows = serializePeakWindows(editForm.peak_windows);
     await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
@@ -6593,31 +6676,14 @@ const confirmDelete = async () => {
   }
 };
 
-// 监听 subscription_type 变化，订阅模式时 is_exclusive 默认为 true；标准模式清空高峰配置
+// 监听 subscription_type 变化，订阅模式时 is_exclusive 默认为 true。
+// 高峰配置已放开订阅限制（standard 分组可用，DeepSeek 谷峰价需求），不再随类型清空。
 watch(
   () => createForm.subscription_type,
   (newVal) => {
     if (newVal === "subscription") {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;
-    } else {
-      createForm.peak_rate_enabled = false;
-      createForm.peak_start = "";
-      createForm.peak_end = "";
-      createForm.peak_rate_multiplier = 1.0;
-    }
-  },
-);
-
-// 编辑表单：切回标准模式时清空高峰配置，避免残留随更新请求提交被后端拒绝
-watch(
-  () => editForm.subscription_type,
-  (newVal) => {
-    if (newVal !== "subscription") {
-      editForm.peak_rate_enabled = false;
-      editForm.peak_start = "";
-      editForm.peak_end = "";
-      editForm.peak_rate_multiplier = 1.0;
     }
   },
 );

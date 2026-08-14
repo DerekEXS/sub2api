@@ -181,6 +181,24 @@ func (_u *GroupUpdate) AddPeakRateMultiplier(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetPeakWindows sets the "peak_windows" field.
+func (_u *GroupUpdate) SetPeakWindows(v []domain.PeakWindow) *GroupUpdate {
+	_u.mutation.SetPeakWindows(v)
+	return _u
+}
+
+// AppendPeakWindows appends value to the "peak_windows" field.
+func (_u *GroupUpdate) AppendPeakWindows(v []domain.PeakWindow) *GroupUpdate {
+	_u.mutation.AppendPeakWindows(v)
+	return _u
+}
+
+// ClearPeakWindows clears the value of the "peak_windows" field.
+func (_u *GroupUpdate) ClearPeakWindows() *GroupUpdate {
+	_u.mutation.ClearPeakWindows()
+	return _u
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_u *GroupUpdate) SetIsExclusive(v bool) *GroupUpdate {
 	_u.mutation.SetIsExclusive(v)
@@ -1541,6 +1559,17 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.PeakWindows(); ok {
+		_spec.SetField(group.FieldPeakWindows, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPeakWindows(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldPeakWindows, value)
+		})
+	}
+	if _u.mutation.PeakWindowsCleared() {
+		_spec.ClearField(group.FieldPeakWindows, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
@@ -2299,6 +2328,24 @@ func (_u *GroupUpdateOne) SetNillablePeakRateMultiplier(v *float64) *GroupUpdate
 // AddPeakRateMultiplier adds value to the "peak_rate_multiplier" field.
 func (_u *GroupUpdateOne) AddPeakRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddPeakRateMultiplier(v)
+	return _u
+}
+
+// SetPeakWindows sets the "peak_windows" field.
+func (_u *GroupUpdateOne) SetPeakWindows(v []domain.PeakWindow) *GroupUpdateOne {
+	_u.mutation.SetPeakWindows(v)
+	return _u
+}
+
+// AppendPeakWindows appends value to the "peak_windows" field.
+func (_u *GroupUpdateOne) AppendPeakWindows(v []domain.PeakWindow) *GroupUpdateOne {
+	_u.mutation.AppendPeakWindows(v)
+	return _u
+}
+
+// ClearPeakWindows clears the value of the "peak_windows" field.
+func (_u *GroupUpdateOne) ClearPeakWindows() *GroupUpdateOne {
+	_u.mutation.ClearPeakWindows()
 	return _u
 }
 
@@ -3691,6 +3738,17 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.PeakWindows(); ok {
+		_spec.SetField(group.FieldPeakWindows, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPeakWindows(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldPeakWindows, value)
+		})
+	}
+	if _u.mutation.PeakWindowsCleared() {
+		_spec.ClearField(group.FieldPeakWindows, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)

@@ -88,8 +88,8 @@ func TestProfitControl_PricingAtFixesDownstreamPeakFactor(t *testing.T) {
 	outsideWindow := time.Date(2026, time.January, 15, 10, 30, 0, 0, timezone.Location())
 	group.PeakStart = "08:00"
 	group.PeakEnd = "09:00"
-	require.Equal(t, 1.0, group.PeakMultiplierAt(outsideWindow), "构造前提：对照时刻不在窗口内")
-	require.Equal(t, 3.0, group.PeakMultiplierAt(pricingAt), "构造前提：pricingAt 在窗口内")
+	require.Equal(t, 1.0, group.PeakMultiplierAt(outsideWindow, ""), "构造前提：对照时刻不在窗口内")
+	require.Equal(t, 3.0, group.PeakMultiplierAt(pricingAt, ""), "构造前提：pricingAt 在窗口内")
 
 	ctx := context.WithValue(profitControlTestCtx(group), openAIPricingAtCtxKey{}, pricingAt)
 	gate := svc.resolveOpenAIProfitControlGate(ctx, &groupID)

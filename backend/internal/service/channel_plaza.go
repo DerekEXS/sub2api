@@ -45,6 +45,7 @@ type PlazaGroup struct {
 	PeakStart          string
 	PeakEnd            string
 	PeakRateMultiplier float64
+	PeakWindows        []PeakWindow
 	IsExclusive        bool
 	// 图片按次实付倍率：ImageRateIndependent 为 true 时，图片计费模型的实付
 	// = 档位价 × ImageRateMultiplier，不乘分组/用户专属倍率（与计费口径一致）。
@@ -96,6 +97,7 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 			PeakStart:            g.PeakStart,
 			PeakEnd:              g.PeakEnd,
 			PeakRateMultiplier:   g.PeakRateMultiplier,
+			PeakWindows:          g.PeakWindows,
 			IsExclusive:          g.IsExclusive,
 			ImageRateIndependent: g.ImageRateIndependent,
 			ImageRateMultiplier:  g.ImageRateMultiplier,

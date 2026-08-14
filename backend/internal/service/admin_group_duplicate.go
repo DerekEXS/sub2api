@@ -56,6 +56,22 @@ func cloneGroupValuePointer[T any](value *T) *T {
 	return &cloned
 }
 
+// cloneGroupPeakWindows 深拷贝多窗口高峰配置（含模型白名单切片），
+// 防止复制分组与原分组共享底层数组产生写穿透。
+func cloneGroupPeakWindows(value []PeakWindow) []PeakWindow {
+	if len(value) == 0 {
+		return nil
+	}
+	out := make([]PeakWindow, len(value))
+	for i, w := range value {
+		if len(w.Models) > 0 {
+			w.Models = append([]string(nil), w.Models...)
+		}
+		out[i] = w
+	}
+	return out
+}
+
 func cloneGroupModelRouting(value map[string][]int64) map[string][]int64 {
 	if value == nil {
 		return nil
@@ -103,6 +119,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		PeakStart:                       source.PeakStart,
 		PeakEnd:                         source.PeakEnd,
 		PeakRateMultiplier:              source.PeakRateMultiplier,
+		PeakWindows:                     cloneGroupPeakWindows(source.PeakWindows),
 		ProfitControlEnabled:            source.ProfitControlEnabled,
 		ProfitMinMargin:                 source.ProfitMinMargin,
 		ProfitSafetyBuffer:              source.ProfitSafetyBuffer,

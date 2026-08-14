@@ -162,6 +162,12 @@ func (_c *GroupCreate) SetNillablePeakRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetPeakWindows sets the "peak_windows" field.
+func (_c *GroupCreate) SetPeakWindows(v []domain.PeakWindow) *GroupCreate {
+	_c.mutation.SetPeakWindows(v)
+	return _c
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 	_c.mutation.SetIsExclusive(v)
@@ -1396,6 +1402,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 		_node.PeakRateMultiplier = value
 	}
+	if value, ok := _c.mutation.PeakWindows(); ok {
+		_spec.SetField(group.FieldPeakWindows, field.TypeJSON, value)
+		_node.PeakWindows = value
+	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
@@ -1889,6 +1899,24 @@ func (u *GroupUpsert) UpdatePeakRateMultiplier() *GroupUpsert {
 // AddPeakRateMultiplier adds v to the "peak_rate_multiplier" field.
 func (u *GroupUpsert) AddPeakRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldPeakRateMultiplier, v)
+	return u
+}
+
+// SetPeakWindows sets the "peak_windows" field.
+func (u *GroupUpsert) SetPeakWindows(v []domain.PeakWindow) *GroupUpsert {
+	u.Set(group.FieldPeakWindows, v)
+	return u
+}
+
+// UpdatePeakWindows sets the "peak_windows" field to the value that was provided on create.
+func (u *GroupUpsert) UpdatePeakWindows() *GroupUpsert {
+	u.SetExcluded(group.FieldPeakWindows)
+	return u
+}
+
+// ClearPeakWindows clears the value of the "peak_windows" field.
+func (u *GroupUpsert) ClearPeakWindows() *GroupUpsert {
+	u.SetNull(group.FieldPeakWindows)
 	return u
 }
 
@@ -2967,6 +2995,27 @@ func (u *GroupUpsertOne) AddPeakRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdatePeakRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetPeakWindows sets the "peak_windows" field.
+func (u *GroupUpsertOne) SetPeakWindows(v []domain.PeakWindow) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetPeakWindows(v)
+	})
+}
+
+// UpdatePeakWindows sets the "peak_windows" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdatePeakWindows() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdatePeakWindows()
+	})
+}
+
+// ClearPeakWindows clears the value of the "peak_windows" field.
+func (u *GroupUpsertOne) ClearPeakWindows() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearPeakWindows()
 	})
 }
 
@@ -4357,6 +4406,27 @@ func (u *GroupUpsertBulk) AddPeakRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdatePeakRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetPeakWindows sets the "peak_windows" field.
+func (u *GroupUpsertBulk) SetPeakWindows(v []domain.PeakWindow) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetPeakWindows(v)
+	})
+}
+
+// UpdatePeakWindows sets the "peak_windows" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdatePeakWindows() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdatePeakWindows()
+	})
+}
+
+// ClearPeakWindows clears the value of the "peak_windows" field.
+func (u *GroupUpsertBulk) ClearPeakWindows() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearPeakWindows()
 	})
 }
 

@@ -83,7 +83,9 @@ func buildKeyBillingInfo(apiKey *service.APIKey, resolvedRate float64, now time.
 	if resolvedRate != groupRate {
 		userRate = &resolvedRate
 	}
-	appliedPeak := apiKey.Group.PeakMultiplierAt(now)
+	// 展示端点无具体请求模型上下文：多窗口模型白名单窗口在此返回 1.0
+	//（仅空白名单窗口生效），EffectiveRateMultiplier 展示按此降级口径。
+	appliedPeak := apiKey.Group.PeakMultiplierAt(now, "")
 
 	response := keyBillingInfoResponse{
 		Object:                  "sub2api.key_billing",

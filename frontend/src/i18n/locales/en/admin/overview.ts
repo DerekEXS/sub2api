@@ -1032,7 +1032,12 @@ export default {
         peakStart: 'Peak start',
         peakEnd: 'Peak end',
         peakMultiplier: 'Peak multiplier',
-        multiplierHint: 'Applies to token billing multiplier; image tokens in token billing are also affected. 0 means peak token requests are billed at 0x.'
+        multiplierHint: 'Applies to token billing multiplier; image tokens in token billing are also affected. 0 means peak token requests are billed at 0x.',
+        multiWindowHint: 'Multiple peak windows are supported (e.g. DeepSeek dual windows 09:00-12:00 + 14:00-18:00). Windows are half-open [start, end) same-day intervals and must not overlap.',
+        modelsWhitelist: 'Model whitelist',
+        modelsWhitelistPlaceholder: 'Leave empty = all models in group; comma-separated, supports * wildcard, e.g. deepseek-v4-flash,deepseek-*',
+        addWindow: '+ Add window',
+        removeWindow: 'Remove window'
       },
       profitControl: {
         enable: 'Enable profit control',

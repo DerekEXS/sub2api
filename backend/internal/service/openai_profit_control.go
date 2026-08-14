@@ -257,7 +257,9 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	if userID, _ := ctx.Value(ctxkey.UserID).(int64); userID > 0 {
 		downstream = s.ResolveUserGroupRateMultiplier(ctx, userID, billingGroup.ID, billingGroup.RateMultiplier)
 	}
-	downstream *= billingGroup.PeakMultiplierAt(pricingAt)
+	// 调度门安装时无具体模型上下文：多窗口模型白名单窗口在此返回 1.0
+	//（门槛偏保守），计费路径在 RecordUsage 按模型精确放大。
+	downstream *= billingGroup.PeakMultiplierAt(pricingAt, "")
 
 	deduction := group.ProfitMinMargin + group.ProfitSafetyBuffer
 	threshold := clampProfitControlThreshold(downstream * (1 - deduction))

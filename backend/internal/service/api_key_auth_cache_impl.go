@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 19 // v19: group search/audio/video_model_prices billing fields (force refresh of pre-fix snapshots)
+const apiKeyAuthSnapshotVersion = 20 // v20: group peak_windows multi-window fields (force refresh of pre-multi-window snapshots)
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -425,6 +425,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			PeakStart:                       apiKey.Group.PeakStart,
 			PeakEnd:                         apiKey.Group.PeakEnd,
 			PeakRateMultiplier:              apiKey.Group.PeakRateMultiplier,
+			PeakWindows:                     apiKey.Group.PeakWindows,
 			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
 			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
@@ -520,6 +521,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			PeakStart:                       snapshot.Group.PeakStart,
 			PeakEnd:                         snapshot.Group.PeakEnd,
 			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
+			PeakWindows:                     snapshot.Group.PeakWindows,
 			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
 			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,

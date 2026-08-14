@@ -908,27 +908,85 @@ func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float6
 		return 1, true
 	}
 
-	start, startOK := data["peak_start"].(string)
-	end, endOK := data["peak_end"].(string)
 	timezoneName, timezoneOK := data["timezone"].(string)
-	peakMultiplier, multiplierOK := resolveAccountExtraNumber(data, "peak_rate_multiplier")
-	startMinute, validStart := parseMinutes(start)
-	endMinute, validEnd := parseMinutes(end)
-	if !startOK || !endOK || !timezoneOK || !multiplierOK || !validStart || !validEnd ||
-		startMinute >= endMinute || peakMultiplier < 0 || math.IsNaN(peakMultiplier) || math.IsInf(peakMultiplier, 0) {
+	if !timezoneOK {
 		return 0, false
 	}
 	location, err := time.LoadLocation(timezoneName)
 	if err != nil {
 		return 0, false
 	}
-
 	local := now.In(location)
 	minute := local.Hour()*60 + local.Minute()
+
+	// 多窗口优先（DeepSeek 双窗口谷峰价，2026-08-14）：账号 extra 可选
+	// peak_windows，与分组侧同构 JSON [{start,end,multiplier,models}]。
+	// 窗口左闭右开 [start,end)，模型白名单在账号成本侧不参与判定（视为全模型）。
+	// 合法窗口存在时按多窗口判定，任一命中返回其倍率，全未命中 1.0。
+	if windows, windowOK := parseUpstreamPeakWindows(data["peak_windows"]); windowOK && len(windows) > 0 {
+		for _, w := range windows {
+			if minute >= w.start && minute < w.end {
+				return w.multiplier, true
+			}
+		}
+		return 1, true
+	}
+
+	start, startOK := data["peak_start"].(string)
+	end, endOK := data["peak_end"].(string)
+	peakMultiplier, multiplierOK := resolveAccountExtraNumber(data, "peak_rate_multiplier")
+	startMinute, validStart := parseMinutes(start)
+	endMinute, validEnd := parseMinutes(end)
+	if !startOK || !endOK || !multiplierOK || !validStart || !validEnd ||
+		startMinute >= endMinute || peakMultiplier < 0 || math.IsNaN(peakMultiplier) || math.IsInf(peakMultiplier, 0) {
+		return 0, false
+	}
 	if minute >= startMinute && minute < endMinute {
 		return peakMultiplier, true
 	}
 	return 1, true
+}
+
+// upstreamPeakWindowSpan 账号侧多窗口高峰的解析产物（分钟级，见 parseUpstreamPeakWindows）。
+type upstreamPeakWindowSpan struct {
+	start, end int
+	multiplier float64
+}
+
+// parseUpstreamPeakWindows 解析账号 extra 的 peak_windows（同构 JSON
+// [{start:"09:00", end:"12:00", multiplier:2.0, models:[...]}]）。
+// 模型白名单字段忽略（账号成本侧按模型无法精确判定，白名单窗口视为全模型）。
+// raw 为 nil / 非数组 / 全部窗口非法时返回 ok=false（回退 legacy 单窗口解析）。
+func parseUpstreamPeakWindows(raw any) ([]upstreamPeakWindowSpan, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	var windows []struct {
+		Start      string  `json:"start"`
+		End        string  `json:"end"`
+		Multiplier float64 `json:"multiplier"`
+	}
+	if err := json.Unmarshal(buf, &windows); err != nil {
+		return nil, false
+	}
+	out := make([]upstreamPeakWindowSpan, 0, len(windows))
+	for _, w := range windows {
+		start, ok1 := parseMinutes(w.Start)
+		end, ok2 := parseMinutes(w.End)
+		if !ok1 || !ok2 || start >= end ||
+			w.Multiplier < 0 || math.IsNaN(w.Multiplier) || math.IsInf(w.Multiplier, 0) {
+			continue // 脏窗口跳过（与分组侧 NormalizePeakWindows 同语义）
+		}
+		out = append(out, upstreamPeakWindowSpan{start: start, end: end, multiplier: w.Multiplier})
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
 func equalBillingMultiplier(left, right float64) bool {

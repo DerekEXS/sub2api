@@ -820,6 +820,16 @@ func PeakRateMultiplierLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldPeakRateMultiplier, v))
 }
 
+// PeakWindowsIsNil applies the IsNil predicate on the "peak_windows" field.
+func PeakWindowsIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldPeakWindows))
+}
+
+// PeakWindowsNotNil applies the NotNil predicate on the "peak_windows" field.
+func PeakWindowsNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldPeakWindows))
+}
+
 // IsExclusiveEQ applies the EQ predicate on the "is_exclusive" field.
 func IsExclusiveEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))

@@ -39,6 +39,8 @@ type Group struct {
 	PeakEnd string `json:"peak_end,omitempty"`
 	// 高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入文本倍率
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier,omitempty"`
+	// 多窗口高峰倍率配置 [{start,end,multiplier,models}]，非空时优先于旧单窗口字段
+	PeakWindows []domain.PeakWindow `json:"peak_windows,omitempty"`
 	// IsExclusive holds the value of the "is_exclusive" field.
 	IsExclusive bool `json:"is_exclusive,omitempty"`
 	// Status holds the value of the "status" field.
@@ -97,7 +99,7 @@ type Group struct {
 	AudioTtsPricePerMillionChars *float64 `json:"audio_tts_price_per_million_chars,omitempty"`
 	// STT 每小时价格（USD）
 	AudioSttPricePerHour *float64 `json:"audio_stt_price_per_hour,omitempty"`
-	// 是否按上下文长度应用模型阶梯价格
+	// 是否按上下文长度应用模型阶梯价格；默认开启以保持官方/渠道长上下文价
 	LongContextPricingEnabled bool `json:"long_context_pricing_enabled,omitempty"`
 	// 分组逐模型定价；优先级高于渠道和内置定价
 	ModelPricing json.RawMessage `json:"model_pricing,omitempty"`
@@ -249,7 +251,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldVideoModelPrices, group.FieldModelPricing, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
+		case group.FieldPeakWindows, group.FieldVideoModelPrices, group.FieldModelPricing, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
 			values[i] = new([]byte)
 		case group.FieldPeakRateEnabled, group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldAllowBatchImageGeneration, group.FieldImageRateIndependent, group.FieldVideoRateIndependent, group.FieldLongContextPricingEnabled, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldAllowLive, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldProfitControlEnabled:
 			values[i] = new(sql.NullBool)
@@ -343,6 +345,14 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field peak_rate_multiplier", values[i])
 			} else if value.Valid {
 				_m.PeakRateMultiplier = value.Float64
+			}
+		case group.FieldPeakWindows:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field peak_windows", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.PeakWindows); err != nil {
+					return fmt.Errorf("unmarshal field peak_windows: %w", err)
+				}
 			}
 		case group.FieldIsExclusive:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -796,6 +806,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("peak_rate_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PeakRateMultiplier))
+	builder.WriteString(", ")
+	builder.WriteString("peak_windows=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PeakWindows))
 	builder.WriteString(", ")
 	builder.WriteString("is_exclusive=")
 	builder.WriteString(fmt.Sprintf("%v", _m.IsExclusive))

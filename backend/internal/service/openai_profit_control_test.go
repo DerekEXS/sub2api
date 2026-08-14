@@ -96,7 +96,7 @@ func TestResolveOpenAIProfitControlGate(t *testing.T) {
 		group.PeakRateMultiplier = 3.0
 		gate := svc.resolveOpenAIProfitControlGate(profitControlTestCtx(group), &groupID)
 		require.NotNil(t, gate)
-		expected := group.RateMultiplier * group.PeakMultiplierAt(timezone.Now()) * 0.5
+		expected := group.RateMultiplier * group.PeakMultiplierAt(timezone.Now(), "") * 0.5
 		require.InDelta(t, expected, gate.threshold, 1e-9)
 		require.Equal(t, PlatformOpenAI, gate.platform)
 	})

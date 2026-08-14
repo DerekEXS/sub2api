@@ -374,9 +374,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if input.PeakRateMultiplier != nil {
 		peakRateMultiplier = *input.PeakRateMultiplier
 	}
-	// 先归一化（非订阅分组清空高峰配置、清洗停用状态下的脏字段）再校验，与 UpdateGroup 同一收口。
+	// 先归一化（清洗停用状态下的脏字段）再校验，与 UpdateGroup 同一收口。
+	// 订阅类型限制已放开：standard/subscription 均可配置高峰。
 	peakRateEnabled, peakStart, peakEnd, peakRateMultiplier := NormalizePeakRateConfig(subscriptionType, input.PeakRateEnabled, input.PeakStart, input.PeakEnd, peakRateMultiplier)
-	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier); err != nil {
+	peakWindows := NormalizePeakWindows(input.PeakWindows)
+	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier, peakWindows); err != nil {
 		return nil, err
 	}
 
@@ -477,6 +479,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		PeakStart:                       peakStart,
 		PeakEnd:                         peakEnd,
 		PeakRateMultiplier:              peakRateMultiplier,
+		PeakWindows:                     peakWindows,
 		ProfitControlEnabled:            profitControlEnabled,
 		ProfitMinMargin:                 profitMinMargin,
 		ProfitSafetyBuffer:              profitSafetyBuffer,
@@ -743,11 +746,15 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.PeakRateMultiplier != nil {
 		group.PeakRateMultiplier = *input.PeakRateMultiplier
 	}
-	// 先归一化（非订阅分组——含本次更新转为非订阅——静默清空高峰配置，清洗停用状态下的脏字段），
+	// 多窗口配置：显式传入才覆盖（部分更新语义），未传保留存量。
+	if input.PeakWindows != nil {
+		group.PeakWindows = NormalizePeakWindows(*input.PeakWindows)
+	}
+	// 先归一化（清洗停用状态下的脏字段）——订阅类型限制已放开，不再按订阅类型清空，
 	// 再收敛校验：Update 可能只传部分 peak 字段，需对合并后的最终配置统一校验，
 	// 防止单独修改 start/end 导致最终 start>=end 等非法配置入库。与 CreateGroup 同一收口。
 	group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier = NormalizePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
-	if err := ValidatePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier); err != nil {
+	if err := ValidatePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier, group.PeakWindows); err != nil {
 		return nil, err
 	}
 	if input.ProfitControlEnabled != nil {

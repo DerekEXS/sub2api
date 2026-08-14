@@ -1029,7 +1029,12 @@ export default {
         peakStart: '高峰开始',
         peakEnd: '高峰结束',
         peakMultiplier: '高峰倍率',
-        multiplierHint: '作用于 token 计费倍率；token 计费的图片 token 同样适用，0 表示高峰 token 请求按 0 倍计费'
+        multiplierHint: '作用于 token 计费倍率；token 计费的图片 token 同样适用，0 表示高峰 token 请求按 0 倍计费',
+        multiWindowHint: '支持多个高峰窗口（如 DeepSeek 双窗口 09:00-12:00 + 14:00-18:00）。窗口为左闭右开区间，不支持跨天；窗口之间不能重叠。',
+        modelsWhitelist: '模型白名单',
+        modelsWhitelistPlaceholder: '留空 = 组内全部模型；逗号分隔，支持 * 通配符，如 deepseek-v4-flash,deepseek-*',
+        addWindow: '＋ 添加窗口',
+        removeWindow: '删除窗口'
       },
       profitControl: {
         enable: '启用利润控制',

@@ -803,15 +803,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		groupDefault := apiKey.Group.RateMultiplier
 		multiplier = s.ResolveUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
 	}
-	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
-	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
-	pricingAt := input.PricingAt
-	if pricingAt.IsZero() {
-		pricingAt = timezone.Now()
-	}
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, pricingAt)
-
-	// 确定计费模型
+	// 确定计费模型（先于高峰因子计算：窗口级模型白名单需要按计费模型判定）
 	concreteBillingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	billingModel := concreteBillingModel
 	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
@@ -830,6 +822,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 通用兜底（与 OpenAI 路径的 usageBillingModelCandidates 语义对齐）：
 	// 选定模型查不到任何价格时回退到实际转发的具体模型。已定价流量不受影响。
 	billingModel = s.billableModelWithFallback(ctx, apiKey, billingModel, result.UpstreamModel, result.Model)
+
+	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
+	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
+	pricingAt := input.PricingAt
+	if pricingAt.IsZero() {
+		pricingAt = timezone.Now()
+	}
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, pricingAt, billingModel)
 
 	// 确定 RequestedModel（渠道映射前的原始模型）
 	requestedModel := result.Model
