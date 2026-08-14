@@ -89,6 +89,14 @@ func RegisterUserRoutes(
 			groups.GET("/rates", h.APIKey.GetUserGroupRates)
 		}
 
+		// Agent 服务（用户级鉴权：每个用户只管自己的实例）
+		agent := authenticated.Group("/agent")
+		{
+			agent.POST("/start", h.Agent.Start)
+			agent.POST("/stop", h.Agent.Stop)
+			agent.GET("/status", h.Agent.Status)
+		}
+
 		// 用户可用渠道（非管理员接口）
 		channels := authenticated.Group("/channels")
 		{

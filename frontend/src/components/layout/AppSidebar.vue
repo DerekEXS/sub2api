@@ -35,6 +35,17 @@
       <template v-if="isAdmin">
         <!-- Admin Section -->
         <div class="sidebar-section">
+          <!-- Agent Service Button -->
+          <router-link
+            to="/agent"
+            class="sidebar-link mb-1"
+            :class="{ 'sidebar-link-active': isActive('/agent'), 'sidebar-link-collapsed': sidebarCollapsed }"
+            :title="sidebarCollapsed ? t('nav.agentService') : undefined"
+            @click="handleMenuItemClick('/agent')"
+          >
+            <component :is="RobotIcon" class="h-5 w-5 flex-shrink-0" />
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.agentService') }}</span>
+          </router-link>
           <template v-for="item in adminNavItems" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
@@ -129,6 +140,17 @@
       <!-- Regular User View -->
       <template v-else-if="!appStore.backendModeEnabled">
         <div class="sidebar-section">
+          <!-- Agent Service Button -->
+          <router-link
+            to="/agent"
+            class="sidebar-link mb-1"
+            :class="{ 'sidebar-link-active': isActive('/agent'), 'sidebar-link-collapsed': sidebarCollapsed }"
+            :title="sidebarCollapsed ? t('nav.agentService') : undefined"
+            @click="handleMenuItemClick('/agent')"
+          >
+            <component :is="RobotIcon" class="h-5 w-5 flex-shrink-0" />
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.agentService') }}</span>
+          </router-link>
           <router-link
             v-for="item in userNavItems"
             :key="item.path"
@@ -672,6 +694,21 @@ const ChevronDownIcon = {
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round',
           d: 'm19.5 8.25-7.5 7.5-7.5-7.5'
+        })
+      ]
+    )
+}
+
+const RobotIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M12 1v6m0 0l-3-3m3 3l3-3M1 16h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'
         })
       ]
     )

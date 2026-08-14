@@ -99,6 +99,7 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	Agent                   AgentConfig                   `mapstructure:"agent"`
 }
 
 type LogConfig struct {
@@ -246,6 +247,20 @@ type ImageStorageConfig struct {
 	PublicBaseURL   string `mapstructure:"public_base_url"`      // 配了则返回 public_base_url/key 直链；否则 presigned
 	PresignExpiry   int    `mapstructure:"presign_expiry_hours"` // public_base_url 为空时的 presigned 过期时长(小时)
 	MaxDownloadByte int64  `mapstructure:"max_download_bytes"`   // 下载上游 url 图片的字节上限
+}
+
+// AgentConfig 用户「Agent 服务」（NY PicoClaw 容器生命周期）配置
+// 四个键全部注册 SetDefault 空值，AutomaticEnv 才能通过 AGENT_* 环境变量覆盖（#108 教训）
+type AgentConfig struct {
+	ManagerURL    string `mapstructure:"manager_url"`     // AGENT_MANAGER_URL: agent-manager daemon 地址（如 http://host.docker.internal:9180）
+	ManagerToken  string `mapstructure:"manager_token"`   // AGENT_MANAGER_TOKEN: X-Agent-Token 认证
+	ModelBaseURL  string `mapstructure:"model_base_url"`  // AGENT_MODEL_BASE_URL: 注入容器的模型 base_url（用户 key 对接的网关）
+	PublicURLBase string `mapstructure:"public_url_base"` // AGENT_PUBLIC_URL_BASE: 返回给前端的 agent_url 前缀（浏览器可达，如 http://192.168.31.90）
+}
+
+// IsConfigured 检查 Agent 服务必要配置是否齐全
+func (c *AgentConfig) IsConfigured() bool {
+	return c.ManagerURL != "" && c.ManagerToken != ""
 }
 
 // IsConfigured 检查对象存储必要字段是否已配置
@@ -2156,6 +2171,12 @@ func setDefaults() {
 	viper.SetDefault("image_storage.access_key_id", "")
 	viper.SetDefault("image_storage.secret_access_key", "")
 	viper.SetDefault("image_storage.public_base_url", "")
+
+	// Agent 服务（fork 新增；空默认值注册后 AutomaticEnv 才能覆盖——#108）
+	viper.SetDefault("agent.manager_url", "")
+	viper.SetDefault("agent.manager_token", "")
+	viper.SetDefault("agent.model_base_url", "")
+	viper.SetDefault("agent.public_url_base", "")
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)

@@ -6026,6 +6026,9 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
+      // P4b 修复（行为不变）：同 update 路径，spread 固定了 peak_windows 的 UI 行类型，
+      // 在字面量内序列化消除类型冲突。
+      peak_windows: serializePeakWindows(createForm.peak_windows),
       model_pricing: groupPricingToAPI(
         createForm.model_pricing,
         createForm.platform,
@@ -6121,7 +6124,6 @@ const handleCreateGroup = async () => {
     requestData.peak_rate_multiplier = normalizeRateMultiplier(
       createForm.peak_rate_multiplier,
     );
-    requestData.peak_windows = serializePeakWindows(createForm.peak_windows);
     await adminAPI.groups.create(requestData);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -6301,6 +6303,11 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+      // P4b 修复（行为不变）：editForm 展开把 peak_windows 固定成 UI 行类型
+      // （PeakWindowRow：含 id + models 逗号串），直接赋值 serializePeakWindows
+      // 结果会类型冲突（PeakWindowPayload：无 id + models: string[]）。
+      // 在字面量内序列化可消除 spread 的固定类型，运行值完全相同。
+      peak_windows: serializePeakWindows(editForm.peak_windows),
       model_pricing: groupPricingToAPI(
         editForm.model_pricing,
         editForm.platform,
@@ -6404,7 +6411,6 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
-    payload.peak_windows = serializePeakWindows(editForm.peak_windows);
     await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();

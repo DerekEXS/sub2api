@@ -35,6 +35,9 @@ services:
         hard: 100000
     ports:
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    extra_hosts:
+      # Agent 服务：容器内 host.docker.internal → 宿主网关（本地测试连 agent-manager/后端闭环）
+      - "host.docker.internal:host-gateway"
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data:Z
@@ -53,6 +56,12 @@ services:
       # models.dev 官方价数据源（可选：空则禁用）
       - PRICING_MODELSDEV_URL=${PRICING_MODELSDEV_URL:-}
       - PRICING_MODELSDEV_SYNC_INTERVAL_MINUTES=${PRICING_MODELSDEV_SYNC_INTERVAL_MINUTES:-30}
+
+      # Agent 服务（用户 PicoClaw 容器生命周期；空默认=禁用）
+      - AGENT_MANAGER_URL=${AGENT_MANAGER_URL:-}
+      - AGENT_MANAGER_TOKEN=${AGENT_MANAGER_TOKEN:-}
+      - AGENT_MODEL_BASE_URL=${AGENT_MODEL_BASE_URL:-}
+      - AGENT_PUBLIC_URL_BASE=${AGENT_PUBLIC_URL_BASE:-}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}

@@ -205,6 +205,29 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+    agentService: 'Agent Service',
+  },
+
+  // Agent Service (one-click PicoClaw container)
+  agentService: {
+    title: 'Agent Service',
+    description: 'Deploy your own isolated PicoClaw container with a dedicated API key in one click. Destroyed when closed.',
+    statusTitle: 'Service Status',
+    statusNotStarted: 'Not Started',
+    statusStarting: 'Starting',
+    statusRunning: 'Running',
+    statusStopping: 'Stopping',
+    statusError: 'Error',
+    statusUnknown: 'Unknown',
+    startButton: 'Start Agent',
+    stopButton: 'Stop Agent',
+    agentUiTitle: 'PicoClaw Web UI',
+    openInNewWindow: 'Open in new window',
+    emptyTitle: 'Agent service not started',
+    emptyHint: 'Click "Start Agent" to create and run your own PicoClaw container.',
+    emptyNote: 'Each user gets an isolated container. Data is retained for 7 days after shutdown.',
+    startError: 'Failed to start, please retry later',
+    stopError: 'Failed to stop, please retry later',
   },
 
   // Auth

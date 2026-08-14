@@ -205,6 +205,29 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
+    agentService: 'Agent 服务',
+  },
+
+  // Agent 服务（PicoClaw 容器一键部署）
+  agentService: {
+    title: 'Agent 服务',
+    description: '一键部署您的独立 PicoClaw 容器（专用环境与 API 密钥，关闭即销毁）。',
+    statusTitle: '服务状态',
+    statusNotStarted: '未启动',
+    statusStarting: '启动中',
+    statusRunning: '运行中',
+    statusStopping: '关闭中',
+    statusError: '异常',
+    statusUnknown: '未知状态',
+    startButton: '启动 Agent',
+    stopButton: '关闭 Agent',
+    agentUiTitle: 'PicoClaw Web UI',
+    openInNewWindow: '在新窗口打开',
+    emptyTitle: '未启动 Agent 服务',
+    emptyHint: '点击「启动 Agent」按钮来创建并运行您的独立 PicoClaw 容器。',
+    emptyNote: '每个用户将获得独立的容器环境，关闭后数据保留 7 天。',
+    startError: '启动失败，请稍后重试',
+    stopError: '关闭失败，请稍后重试',
   },
 
   // Auth

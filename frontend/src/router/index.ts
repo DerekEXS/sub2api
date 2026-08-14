@@ -395,6 +395,18 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'customPage.title',
     }
   },
+  {
+    path: '/agent',
+    name: 'AgentService',
+    component: () => import('@/views/AgentService.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Agent Service',
+      titleKey: 'nav.agentService',
+      descriptionKey: 'agentService.description'
+    }
+  },
 
   // ==================== Admin Routes ====================
   {

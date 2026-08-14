@@ -870,7 +870,19 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorV2Aggregator,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+
+	// Agent 服务（NY PicoClaw 容器生命周期）
+	NewAgentService,
+	ProvideAgentManagerClient,
+	NewSQLAgentStore,
+	NewAPIKeyAgentProvisioner,
 )
+
+// ProvideAgentManagerClient 从配置构造 NY agent-manager HTTP 客户端。
+// 用 Provider 函数包一层，避免 wire 对两个裸 string（baseURL/token）的歧义。
+func ProvideAgentManagerClient(cfg *config.Config) AgentManagerClient {
+	return NewHTTPAgentManagerClient(cfg.Agent.ManagerURL, cfg.Agent.ManagerToken)
+}
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
