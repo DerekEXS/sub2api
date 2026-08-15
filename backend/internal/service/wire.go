@@ -878,9 +878,9 @@ var ProviderSet = wire.NewSet(
 	NewAPIKeyAgentProvisioner,
 )
 
-// ProvideAgentManagerClient 从配置构造 NY agent-manager HTTP 客户端。
+// ProvideAgentManagerClient 从配置构造 NY agent-manager HTTP 客户端（/v2 API）。
 // 用 Provider 函数包一层，避免 wire 对两个裸 string（baseURL/token）的歧义。
-func ProvideAgentManagerClient(cfg *config.Config) AgentManagerClient {
+func ProvideAgentManagerClient(cfg *config.Config) AgentManagerInterface {
 	return NewHTTPAgentManagerClient(cfg.Agent.ManagerURL, cfg.Agent.ManagerToken)
 }
 

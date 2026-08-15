@@ -183,9 +183,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// L0 硬规则：UA 拒绝（空 UA / 非 Mozilla -> 403，防 curl/Go-http-client 批量小号）
+	// 在验证码校验前拦截，节省资源。
+	clientIP := ip.GetClientIP(c)
+	guard := service.GetRegistrationGuard()
+	if guard.IsBlockedUA(c.GetHeader("User-Agent")) {
+		response.Forbidden(c, "REGISTER_BLOCKED")
+		return
+	}
+
 	// 验证当前启用的验证码（邮箱验证码注册场景避免重复校验一次性票据）
 	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
-	if err := h.authService.VerifyCaptchaForRegister(c.Request.Context(), proof, ip.GetClientIP(c), req.VerifyCode); err != nil {
+	if err := h.authService.VerifyCaptchaForRegister(c.Request.Context(), proof, clientIP, req.VerifyCode); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -203,6 +212,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+
+	// L1 评分（注册成功路径才计数；邀请码豁免 IP 信号）
+	_, _ = guard.Evaluate(c.Request.Context(), service.RegEvaluateInput{
+		UserID:    user.ID,
+		IP:        clientIP,
+		Email:     req.Email,
+		UserAgent: c.GetHeader("User-Agent"),
+		Invited:   req.InvitationCode != "",
+	})
 
 	h.respondWithTokenPair(c, user)
 }

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,36 +16,66 @@ import (
 )
 
 // ──────────────────────────────────────────────────────────────
-// AgentService - 用户「Agent 服务」生命周期管理
+// AgentService v2 - 用户「Agent 服务」生命周期管理（薄代理架构）
 //
-// 每个用户最多一个实例（agents 表 UNIQUE(user_id)）：
-//   - StartAgent: 创建用户专属 API key（绑用户第一个可用分组）-> 调 NY agent-manager
-//     POST /v1/create（严格隔离容器）-> 写 agents 表。已有实例则返回现状态（幂等）。
-//     若 DB 中存在 orphaned 记录（上次 stop 失败遗留），先清理旧容器再创建新实例。
-//   - StopAgent: 调 agent-manager POST /v1/destroy（容器销毁、数据目录保留 7 天）
-//     -> 吊销用户专属 key -> 清 agents 表。
-//     destroy 失败时保留 DB 记录（status=orphaned）+ 不吊销 key，等下次重试。
-//   - GetAgentStatus: 读 agents 表 + agent-manager GET /v1/status 合并返回。
+// NY agent-manager 是状态唯一权威源；本服务只做代理 + 计费 key 注入 + 权限。
+//   - StartAgent: 调 manager Create（带用户专属 key）-> 201/200 表示 active，202 表示 queued
+//   - GetAgentStatus: 代理 manager Get，无记录返回 not_started
+//   - StopAgent: 代理 manager Delete；manager 报错 -> 保留行状态 error 并返回错误
+//   - ListAgents / DownloadArchive: 管理端代理到 manager
 //
-// 依赖均为接口（AgentManagerClient / AgentKeyProvisioner / AgentStore），
-// 单测用 mock/fake 覆盖生命周期（start/stop/status/重复 start 幂等/stop 失败保留记录）。
+// 相比 v1（本地 agents 表 + POST /v1/create）的差异：
+//   - v1 的 orphaned 语义（destroy 失败保留 DB 记录待重试）由 manager 侧接管，
+//     本服务仅把 manager 的错误透传给调用方，并保留行状态 error 供审计。
+//   - 生命周期计时器（1h idle 销毁 / 24h 保留 / 72h 硬顶）在 manager 侧执行。
+//
+// 依赖均为接口（AgentManagerInterface / AgentKeyProvisioner / AgentStore），
+// 单测用 mock/fake 覆盖（201/202/200/404/manager 500/archive 流式）。
 // ──────────────────────────────────────────────────────────────
 
 // defaultAgentModel 是注入容器的默认模型。容器 base_url 指向云间API网关
 // （AGENT_MODEL_BASE_URL），用户专属 key 绑定的分组需包含该模型。
 const defaultAgentModel = "deepseek-v4-flash"
 
-// AgentManagerStatus 是 agent-manager /v1/status 的响应结构。
-type AgentManagerStatus struct {
-	Status string `json:"status"` // running / stopped / missing
-	Port   int    `json:"port"`
+// AgentV2State 是 manager /v2/agents 响应中单个实例的状态结构。
+type AgentV2State struct {
+	UserID          int64  `json:"user_id"`
+	Status          string `json:"status"` // none/queued/provisioning/active/retained/over_quota
+	Port            int    `json:"port,omitempty"`
+	AccessHost      string `json:"access_host,omitempty"`
+	AccessPassword  string `json:"access_password,omitempty"`
+	IdleDeadline    int64  `json:"idle_deadline,omitempty"`    // unix 秒
+	RetainDeadline  int64  `json:"retain_deadline,omitempty"`  // unix 秒
+	HardcapDeadline int64  `json:"hardcap_deadline,omitempty"` // unix 秒
+	Position        int    `json:"position,omitempty"`         // queued 时的排队位置
 }
 
-// AgentManagerClient 抽象 NY agent-manager daemon 的 HTTP 接口（可 mock）。
-type AgentManagerClient interface {
-	Create(ctx context.Context, name, apiKey, baseURL, model string) (int, error)
-	Destroy(ctx context.Context, name string) error
-	Status(ctx context.Context, name string) (AgentManagerStatus, error)
+// AgentPoolStats 是 manager 池统计。
+type AgentPoolStats struct {
+	FreeGB   int `json:"free_gb"`
+	Active   int `json:"active"`
+	Queued   int `json:"queued"`
+	Archived int `json:"archived"`
+}
+
+// AgentListResponse 是 manager GET /v2/agents 的完整响应。
+type AgentListResponse struct {
+	Agents []AgentV2State `json:"agents"`
+	Pool   AgentPoolStats `json:"pool"`
+}
+
+// AgentManagerInterface 抽象 NY agent-manager daemon 的 /v2 API（可 mock）。
+type AgentManagerInterface interface {
+	// Create 请求创建实例。返回状态码语义：201=已激活 202=已排队 200=已存在（幂等）。
+	Create(ctx context.Context, userID int64, apiKey string) (*AgentV2State, int, error)
+	// Get 查询单实例；无实例时返回 (nil, nil, nil)。
+	Get(ctx context.Context, userID int64) (*AgentV2State, error)
+	// Delete 销毁并归档实例（幂等：无实例也返回成功）。
+	Delete(ctx context.Context, userID int64) error
+	// List 返回全量实例 + 池统计。
+	List(ctx context.Context) (*AgentListResponse, error)
+	// Archive 流式返回实例归档 tar.gz（io.Reader 透传）。
+	Archive(ctx context.Context, userID int64) (io.Reader, error)
 }
 
 // AgentKeyProvisioner 抽象用户专属 API key 的创建/吊销（可 mock）。
@@ -54,7 +84,7 @@ type AgentKeyProvisioner interface {
 	Revoke(ctx context.Context, keyID int64) error
 }
 
-// Agent 是 agents 表的一行（用户实例记录）。
+// Agent 是 agents 表的行（记录后端已知的实例映射，用于 key 生命周期管理）。
 //
 // AgentKey 存储明文 API key（设计如此）：该 key 仅用于注入用户实例的 config.json，
 // destroy 时立即吊销（软删 deleted_at）。key 不出现在日志/备份/错误响应中。
@@ -63,7 +93,7 @@ type Agent struct {
 	UserID        int64
 	ContainerName string
 	Port          int
-	Status        string // running / stopped / orphaned
+	Status        string // running / queued / stopped / orphaned / error
 	AgentKey      string // 明文存储，destroy 即吊销（见上方注释）
 	AgentKeyID    int64
 	CreatedAt     time.Time
@@ -138,22 +168,22 @@ type httpAgentManagerClient struct {
 	client  *http.Client
 }
 
-func NewHTTPAgentManagerClient(baseURL, token string) AgentManagerClient {
+func NewHTTPAgentManagerClient(baseURL, token string) AgentManagerInterface {
 	return &httpAgentManagerClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
-		client:  &http.Client{Timeout: 90 * time.Second}, // create 需等待容器 healthy（~30s）
+		client:  &http.Client{Timeout: 120 * time.Second}, // create 需等待容器 healthy（~30s），archive 需留流式读
 	}
 }
 
-func (c *httpAgentManagerClient) doJSON(ctx context.Context, method, path string, payload any) (map[string]any, error) {
+func (c *httpAgentManagerClient) do(ctx context.Context, method, path string, payload any) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request: %w", err)
 		}
-		body = bytes.NewReader(raw)
+		body = strings.NewReader(string(raw))
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
@@ -161,61 +191,118 @@ func (c *httpAgentManagerClient) doJSON(ctx context.Context, method, path string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Agent-Token", c.token)
-
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("agent-manager %s %s: %w", method, path, err)
 	}
+	return resp, nil
+}
+
+func (c *httpAgentManagerClient) Create(ctx context.Context, userID int64, apiKey string) (*AgentV2State, int, error) {
+	resp, err := c.do(ctx, http.MethodPost, "/v2/agents", map[string]any{
+		"user_id": userID,
+		"api_key": apiKey,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
 	defer resp.Body.Close()
 
+	// archive 之外的 /v2 API 全部返回 JSON
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusCreated, http.StatusOK, http.StatusAccepted:
+		var st AgentV2State
+		if err := json.Unmarshal(raw, &st); err != nil {
+			return nil, resp.StatusCode, fmt.Errorf("parse response: %w", err)
+		}
+		return &st, resp.StatusCode, nil
+	default:
+		return nil, resp.StatusCode, fmt.Errorf("agent-manager create: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+}
+
+func (c *httpAgentManagerClient) Get(ctx context.Context, userID int64) (*AgentV2State, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/v2/agents/"+strconv.FormatInt(userID, 10), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // 无实例
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent-manager %s %s: http %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		return nil, fmt.Errorf("agent-manager get: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
-	var out map[string]any
+	var st AgentV2State
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+	return &st, nil
+}
+
+func (c *httpAgentManagerClient) Delete(ctx context.Context, userID int64) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/v2/agents/"+strconv.FormatInt(userID, 10), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // 幂等：无实例 = 成功
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("agent-manager delete: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
+}
+
+func (c *httpAgentManagerClient) List(ctx context.Context) (*AgentListResponse, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/v2/agents", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent-manager list: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out AgentListResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	if ok, _ := out["ok"].(bool); !ok {
-		msg, _ := out["error"].(string)
-		return nil, fmt.Errorf("agent-manager %s %s: %s", method, path, msg)
-	}
-	return out, nil
+	return &out, nil
 }
 
-func (c *httpAgentManagerClient) Create(ctx context.Context, name, apiKey, baseURL, model string) (int, error) {
-	out, err := c.doJSON(ctx, http.MethodPost, "/v1/create", map[string]any{
-		"name":     name,
-		"api_key":  apiKey,
-		"base_url": baseURL,
-		"model":    model,
-	})
+func (c *httpAgentManagerClient) Archive(ctx context.Context, userID int64) (io.Reader, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/v2/agents/"+strconv.FormatInt(userID, 10)+"/archive", nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	port, _ := out["port"].(float64)
-	return int(port), nil
-}
-
-func (c *httpAgentManagerClient) Destroy(ctx context.Context, name string) error {
-	_, err := c.doJSON(ctx, http.MethodPost, "/v1/destroy", map[string]any{"name": name})
-	return err
-}
-
-func (c *httpAgentManagerClient) Status(ctx context.Context, name string) (AgentManagerStatus, error) {
-	out, err := c.doJSON(ctx, http.MethodGet, "/v1/status/"+name, nil)
-	if err != nil {
-		return AgentManagerStatus{}, err
+	if resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return nil, errors.New("agent archive not found")
 	}
-	st := AgentManagerStatus{}
-	st.Status, _ = out["status"].(string)
-	if p, ok := out["port"].(float64); ok {
-		st.Port = int(p)
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("agent-manager archive: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
-	return st, nil
+	return resp.Body, nil // 流式返回，调用方负责关闭
 }
 
 // apiKeyAgentProvisioner 基于 APIKeyService 的真实 key 创建/吊销。
@@ -263,112 +350,118 @@ func (p *apiKeyAgentProvisioner) Revoke(ctx context.Context, keyID int64) error 
 }
 
 // ──────────────────────────────────────────────────────────────
-// AgentService
+// AgentService v2
 // ──────────────────────────────────────────────────────────────
 
-// AgentService 编排 Agent 实例的完整生命周期。
+// AgentService 编排 Agent 实例的完整生命周期（薄代理到 NY manager）。
 type AgentService struct {
-	store      AgentStore
-	manager    AgentManagerClient
-	provision  AgentKeyProvisioner
-	cfg        *config.Config
-	httpClient *http.Client
+	store     AgentStore
+	manager   AgentManagerInterface
+	provision AgentKeyProvisioner
+	cfg       *config.Config
 }
 
 func NewAgentService(
 	store AgentStore,
-	manager AgentManagerClient,
+	manager AgentManagerInterface,
 	provision AgentKeyProvisioner,
 	cfg *config.Config,
 ) *AgentService {
 	return &AgentService{
-		store:      store,
-		manager:    manager,
-		provision:  provision,
-		cfg:        cfg,
-		httpClient: &http.Client{Timeout: 90 * time.Second},
+		store:     store,
+		manager:   manager,
+		provision: provision,
+		cfg:       cfg,
 	}
 }
 
-// AgentState 是返回给前端的实例状态（含 agent_url）。
+// AgentState 是返回给前端的实例状态。
 type AgentState struct {
-	Status    string `json:"status"` // not_started / running / stopped / orphaned / error
-	Port      int    `json:"port,omitempty"`
-	AgentURL  string `json:"agent_url,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	Status          string `json:"status"` // not_started / running / queued / provisioning / retained / over_quota / error
+	Port            int    `json:"port,omitempty"`
+	AccessHost      string `json:"access_host,omitempty"`
+	AccessPassword  string `json:"access_password,omitempty"`
+	AgentURL        string `json:"agent_url,omitempty"`
+	IdleDeadline    int64  `json:"idle_deadline,omitempty"`
+	RetainDeadline  int64  `json:"retain_deadline,omitempty"`
+	HardcapDeadline int64  `json:"hardcap_deadline,omitempty"`
+	Position        int    `json:"position,omitempty"`
+	CreatedAt       string `json:"created_at,omitempty"`
 }
 
-func containerNameFor(userID int64) string {
-	return fmt.Sprintf("agent-%d", userID)
+func (s *AgentService) IsConfigured() bool {
+	return s.cfg.Agent.IsConfigured()
 }
 
-// StartAgent 启动用户 Agent 实例。
-//   - 已有 running 实例：返回现状态（幂等，不重复创建 key/容器）
-//   - 已有 orphaned 记录（上次 stop 失败遗留）：先清理旧容器+吊销旧 key，再创建新实例
+// StartAgent 启动用户 Agent 实例（薄代理到 manager Create）。
+// 201/200 -> running，202 -> queued。manager 错误透传给调用方。
 func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentState, error) {
 	if !s.cfg.Agent.IsConfigured() {
 		return nil, errors.New("agent service not configured (AGENT_MANAGER_URL / AGENT_MANAGER_TOKEN)")
 	}
 
+	// 已有记录且非 error/orphaned：幂等返回现状态（不重复创建 key）
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil {
-		// orphaned 记录：上次 stop 失败遗留的孤儿容器，先清理再重建（MAJOR 2 对账）
-		if existing.Status == "orphaned" {
-			_ = s.manager.Destroy(ctx, existing.ContainerName) // best-effort 清理旧容器
-			_ = s.provision.Revoke(ctx, existing.AgentKeyID)   // 吊销旧 key
-			_ = s.store.DeleteByUser(ctx, userID)              // 清旧记录
-			// 继续往下创建新实例
-		} else {
-			// 幂等：已有实例直接返回现状态（不重复创建 key）
-			return s.stateFromRow(ctx, existing)
-		}
+	if existing != nil && existing.Status != "error" && existing.Status != "orphaned" {
+		return s.mapRowToState(existing), nil
 	}
 
-	name := containerNameFor(userID)
+	// 生成用户专属 key（绑定第一个可用分组）
 	key, keyID, err := s.provision.Create(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	model := defaultAgentModel
-	baseURL := s.cfg.Agent.ModelBaseURL
-	if baseURL == "" {
-		baseURL = s.cfg.Server.FrontendURL + "/v1"
-	}
-	port, err := s.manager.Create(ctx, name, key, baseURL, model)
+	// 代理到 manager
+	st, code, err := s.manager.Create(ctx, userID, key)
 	if err != nil {
 		// 容器创建失败：吊销刚创建的 key，不留孤儿
 		_ = s.provision.Revoke(ctx, keyID)
 		return nil, fmt.Errorf("start agent: %w", err)
 	}
 
+	status := "running"
+	if code == http.StatusAccepted {
+		status = "queued"
+	}
+	if st != nil && st.Status != "" {
+		status = st.Status
+	}
+
 	agent := &Agent{
 		UserID:        userID,
-		ContainerName: name,
-		Port:          port,
-		Status:        "running",
+		ContainerName: fmt.Sprintf("agent-%d", userID),
+		Port:          0,
+		Status:        status,
 		AgentKey:      key,
 		AgentKeyID:    keyID,
+	}
+	if st != nil {
+		agent.Port = st.Port
 	}
 	if err := s.store.Upsert(ctx, agent); err != nil {
 		return nil, fmt.Errorf("start agent: persist: %w", err)
 	}
-	return &AgentState{
-		Status:    "running",
-		Port:      port,
-		AgentURL:  s.agentURL(port),
-		CreatedAt: time.Now().Format(time.RFC3339),
-	}, nil
+
+	state := s.mapRowToState(agent)
+	if st != nil {
+		state.AccessHost = st.AccessHost
+		state.AccessPassword = st.AccessPassword
+		state.IdleDeadline = st.IdleDeadline
+		state.RetainDeadline = st.RetainDeadline
+		state.HardcapDeadline = st.HardcapDeadline
+		state.Position = st.Position
+		state.Port = st.Port
+		state.AgentURL = s.agentURL(st)
+	}
+	return state, nil
 }
 
-// StopAgent 停止并销毁用户 Agent 实例（幂等：无实例时直接返回成功）。
-//
-// MAJOR 2 修复：destroy 失败时保留 DB 记录（status=orphaned）+ 保留 key 不吊销，
-// 返回错误给调用方。下次 StartAgent 时自动对账清理（见 StartAgent orphaned 分支）。
-// destroy 成功后才吊销 key + 清库。
+// StopAgent 停止并销毁用户 Agent 实例（薄代理到 manager Delete，幂等）。
+// manager 报错 -> 保留行状态 error 并返回错误（v1 orphaned 语义由 manager 接管）。
 func (s *AgentService) StopAgent(ctx context.Context, userID int64) error {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
@@ -378,87 +471,91 @@ func (s *AgentService) StopAgent(ctx context.Context, userID int64) error {
 		return nil // 幂等：无实例 = 成功
 	}
 
-	// 1. 销毁容器（manager 侧：rm -f 重试 3 次 + 幂等 + 数据目录保留 7 天）
-	destroyErr := s.manager.Destroy(ctx, existing.ContainerName)
-	if destroyErr != nil {
-		// MAJOR 2: destroy 失败 -> 保留 DB 记录为 orphaned + 保留 key
-		// 下次 StartAgent 自动对账（清理旧容器 -> 创建新实例）
-		existing.Status = "orphaned"
+	if err := s.manager.Delete(ctx, userID); err != nil {
+		existing.Status = "error"
 		_ = s.store.Upsert(ctx, existing)
-		return fmt.Errorf("stop agent: destroy failed (record preserved for retry): %w", destroyErr)
+		return fmt.Errorf("stop agent: destroy failed (row preserved as error): %w", err)
 	}
 
-	// 2. destroy 成功：吊销用户专属 key
+	// 销毁成功：吊销 key + 清库
 	if err := s.provision.Revoke(ctx, existing.AgentKeyID); err != nil {
-		// key 吊销失败不阻塞清库（容器已销毁，key 可后续手动清理）
-		// 但记录为 orphaned 以提醒有人工介入
-		existing.Status = "orphaned"
+		existing.Status = "error"
 		_ = s.store.Upsert(ctx, existing)
 		return fmt.Errorf("stop agent: revoke key failed (container destroyed): %w", err)
 	}
-
-	// 3. 清库
 	if err := s.store.DeleteByUser(ctx, userID); err != nil {
 		return fmt.Errorf("stop agent: clear: %w", err)
 	}
 	return nil
 }
 
-// GetAgentStatus 返回用户实例当前状态（无实例 -> not_started）。
+// GetAgentStatus 返回用户实例状态（薄代理 manager Get；无实例 -> not_started）。
 func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*AgentState, error) {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if existing == nil {
-		return &AgentState{Status: "not_started"}, nil
-	}
-	return s.stateFromRow(ctx, existing)
-}
 
-// stateFromRow 合并数据库记录与 agent-manager 实时状态。
-func (s *AgentService) stateFromRow(ctx context.Context, a *Agent) (*AgentState, error) {
-	state := &AgentState{
-		Status:    a.Status,
-		Port:      a.Port,
-		AgentURL:  s.agentURL(a.Port),
-		CreatedAt: a.CreatedAt.Format(time.RFC3339),
-	}
-
-	// orphaned 状态优先返回 DB 记录（manager 可能也不可达）
-	if a.Status == "orphaned" {
-		return state, nil
-	}
-
-	mgr, err := s.manager.Status(ctx, a.ContainerName)
+	st, err := s.manager.Get(ctx, userID)
 	if err != nil {
-		// manager 不可达不算致命：保留库内状态
-		return state, nil
-	}
-	switch mgr.Status {
-	case "running":
-		state.Status = "running"
-		if mgr.Port > 0 {
-			state.Port = mgr.Port
-			state.AgentURL = s.agentURL(mgr.Port)
+		// manager 不可达：回退到库内记录（不致命）
+		if existing == nil {
+			return &AgentState{Status: "not_started"}, nil
 		}
-	case "stopped", "missing":
-		state.Status = "stopped"
-		state.Port = 0
-		state.AgentURL = ""
-	default:
-		state.Status = mgr.Status
+		return s.mapRowToState(existing), nil
 	}
+	if st == nil {
+		// manager 无记录；若本地有记录则反映（可能 manager 已重置）
+		if existing == nil {
+			return &AgentState{Status: "not_started"}, nil
+		}
+		return s.mapRowToState(existing), nil
+	}
+
+	state := &AgentState{
+		Status:          st.Status,
+		Port:            st.Port,
+		AccessHost:      st.AccessHost,
+		AccessPassword:  st.AccessPassword,
+		IdleDeadline:    st.IdleDeadline,
+		RetainDeadline:  st.RetainDeadline,
+		HardcapDeadline: st.HardcapDeadline,
+		Position:        st.Position,
+	}
+	state.AgentURL = s.agentURL(st)
 	return state, nil
 }
 
-func (s *AgentService) agentURL(port int) string {
-	if port <= 0 {
+// ListAgents 返回全量实例 + 池统计（管理端）。
+func (s *AgentService) ListAgents(ctx context.Context) (*AgentListResponse, error) {
+	return s.manager.List(ctx)
+}
+
+// DownloadArchive 流式返回用户实例归档（管理端）。
+func (s *AgentService) DownloadArchive(ctx context.Context, userID int64) (io.Reader, error) {
+	return s.manager.Archive(ctx, userID)
+}
+
+// mapRowToState 从库内记录构建状态（manager 不可达时回退用）。
+func (s *AgentService) mapRowToState(a *Agent) *AgentState {
+	st := &AgentState{
+		Status:    a.Status,
+		Port:      a.Port,
+		CreatedAt: a.CreatedAt.Format(time.RFC3339),
+	}
+	if (a.Status == "running" || a.Status == "active") && a.Port > 0 {
+		st.AgentURL = s.agentURL(&AgentV2State{Port: a.Port})
+	}
+	return st
+}
+
+func (s *AgentService) agentURL(st *AgentV2State) string {
+	if st == nil || st.Port <= 0 {
 		return ""
 	}
 	base := s.cfg.Agent.PublicURLBase
 	if base == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d", strings.TrimRight(base, "/"), port)
+	return fmt.Sprintf("%s:%d", strings.TrimRight(base, "/"), st.Port)
 }

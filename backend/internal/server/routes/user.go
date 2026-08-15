@@ -95,6 +95,7 @@ func RegisterUserRoutes(
 			agent.POST("/start", h.Agent.Start)
 			agent.POST("/stop", h.Agent.Stop)
 			agent.GET("/status", h.Agent.Status)
+			agent.GET("/archive", h.Agent.Archive)
 		}
 
 		// 用户可用渠道（非管理员接口）

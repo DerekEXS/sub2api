@@ -97,6 +97,12 @@ func RegisterAdminRoutes(
 		// TLS 指纹模板管理
 		registerTLSFingerprintProfileRoutes(admin, h)
 
+		// Agent 服务管理（实例列表/销毁/归档下载）
+		registerAgentAdminRoutes(admin, h)
+
+		// 注册风险审计（registration-audit）
+		registerRegistrationAuditRoutes(admin, h)
+
 		// API Key 管理
 		registerAdminAPIKeyRoutes(admin, h)
 
@@ -842,5 +848,23 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 			return
 		}
 		c.Next()
+	}
+}
+
+// registerAgentAdminRoutes 注册 Agent 服务管理路由。
+func registerAgentAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	agents := admin.Group("/agents")
+	{
+		agents.GET("", h.Admin.Agent.List)
+		agents.DELETE("/:user_id", h.Admin.Agent.Delete)
+		agents.GET("/:user_id/archive", h.Admin.Agent.Archive)
+	}
+}
+
+// registerRegistrationAuditRoutes 注册注册风险审计路由。
+func registerRegistrationAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	audit := admin.Group("/registration-audit")
+	{
+		audit.GET("", h.Admin.Agent.RegistrationAudit)
 	}
 }

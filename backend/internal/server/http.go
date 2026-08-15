@@ -87,6 +87,9 @@ func ProvideRouter(
 		service.SetWebSearchManager(websearch.NewManager(configs, redisClient))
 	})
 
+	// 注册 IP 多维评分 guard 注入 redis（未注入时仅 L0 UA 检查，fail-open）
+	service.SetRegistrationGuardRedis(&service.RedisCounterAdapter{Client: redisClient})
+
 	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
 }
 
