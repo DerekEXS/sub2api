@@ -24,6 +24,58 @@
       </div>
     </div>
 
+    <!-- Agent 后端硬件监控（运维监控同风格：指标卡 + 进度条，30s 自动刷新） -->
+    <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">{{ t('admin.agent.hwTitle') }}</h2>
+        <span v-if="metrics" class="text-xs text-gray-400">
+          {{ t('admin.agent.hwUptime') }} {{ fmtUptime(metrics.uptime_seconds) }} · {{ t('admin.agent.hwContainers') }} {{ metrics.containers_running }}
+        </span>
+      </div>
+      <div v-if="metricsError" class="text-sm text-red-500">{{ t('admin.agent.hwUnavailable') }}</div>
+      <div v-else-if="!metrics" class="text-sm text-gray-500">{{ t('admin.agent.loading') }}</div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- CPU -->
+        <div class="rounded-lg border border-gray-100 dark:border-dark-700 p-4">
+          <div class="flex items-baseline justify-between">
+            <span class="text-sm text-gray-500 dark:text-gray-400">CPU</span>
+            <span class="text-lg font-bold" :class="gaugeTextClass(metrics.cpu_percent)">{{ metrics.cpu_percent }}%</span>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-gray-100 dark:bg-dark-700 overflow-hidden">
+            <div class="h-full rounded-full transition-all" :class="gaugeBarClass(metrics.cpu_percent)" :style="{ width: Math.min(metrics.cpu_percent, 100) + '%' }"></div>
+          </div>
+          <div class="mt-2 text-xs text-gray-400">
+            {{ metrics.cpu_cores }} {{ t('admin.agent.hwCores') }} · load {{ metrics.load1 }} / {{ metrics.load5 }} / {{ metrics.load15 }}
+          </div>
+        </div>
+        <!-- 内存 -->
+        <div class="rounded-lg border border-gray-100 dark:border-dark-700 p-4">
+          <div class="flex items-baseline justify-between">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.agent.hwMemory') }}</span>
+            <span class="text-lg font-bold" :class="gaugeTextClass(metrics.mem_percent)">{{ metrics.mem_percent }}%</span>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-gray-100 dark:bg-dark-700 overflow-hidden">
+            <div class="h-full rounded-full transition-all" :class="gaugeBarClass(metrics.mem_percent)" :style="{ width: Math.min(metrics.mem_percent, 100) + '%' }"></div>
+          </div>
+          <div class="mt-2 text-xs text-gray-400">
+            {{ fmtMB(metrics.mem_used_mb) }} / {{ fmtMB(metrics.mem_total_mb) }}
+            <span v-if="metrics.swap_total_mb"> · swap {{ fmtMB(metrics.swap_used_mb) }}/{{ fmtMB(metrics.swap_total_mb) }}</span>
+          </div>
+        </div>
+        <!-- 磁盘 -->
+        <div class="rounded-lg border border-gray-100 dark:border-dark-700 p-4">
+          <div class="flex items-baseline justify-between">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.agent.hwDisk') }}</span>
+            <span class="text-lg font-bold" :class="gaugeTextClass(metrics.disk_percent)">{{ metrics.disk_percent }}%</span>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-gray-100 dark:bg-dark-700 overflow-hidden">
+            <div class="h-full rounded-full transition-all" :class="gaugeBarClass(metrics.disk_percent)" :style="{ width: Math.min(metrics.disk_percent, 100) + '%' }"></div>
+          </div>
+          <div class="mt-2 text-xs text-gray-400">{{ metrics.disk_used_gb }} GB / {{ metrics.disk_total_gb }} GB</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 全局配置 -->
     <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
       <h2 class="text-xl font-semibold mb-4">{{ t('admin.agent.globalConfig') }}</h2>
@@ -104,6 +156,7 @@
         <thead>
           <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-dark-600">
             <th class="py-2 pr-4">{{ t('admin.agent.colUser') }}</th>
+            <th class="py-2 pr-4">{{ t('admin.agent.colIdentity') }}</th>
             <th class="py-2 pr-4">{{ t('admin.agent.colStatus') }}</th>
             <th class="py-2 pr-4">{{ t('admin.agent.colHost') }}</th>
             <th class="py-2 pr-4">{{ t('admin.agent.colHardcap') }}</th>
@@ -114,6 +167,10 @@
           <template v-for="a in agents" :key="a.user_id">
           <tr class="border-b border-gray-100 dark:border-dark-700">
             <td class="py-2 pr-4 font-mono">{{ a.user_id }}</td>
+            <td class="py-2 pr-4">
+              <div class="text-xs">{{ a.email || '—' }}</div>
+              <div v-if="a.username" class="text-xs text-gray-400">{{ a.username }}</div>
+            </td>
             <td class="py-2 pr-4">
               <span :class="statusBadgeClass(a.status)" class="px-2 py-0.5 rounded-full text-xs">{{ statusText(a.status) }}</span>
             </td>
@@ -142,7 +199,7 @@
           </tr>
           <!-- 每用户配置行内编辑 -->
           <tr v-if="editUserId === a.user_id" class="bg-blue-50/50 dark:bg-blue-900/10 border-b border-gray-100 dark:border-dark-700">
-            <td colspan="5" class="py-3 px-2">
+            <td colspan="6" class="py-3 px-2">
               <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retainHours') }}</label>
@@ -217,16 +274,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAdminAPI } from '@/api/admin/agents'
-import type { AgentState } from '@/api/agent'
-import type { AgentPoolStats, AgentConfig } from '@/api/admin/agents'
+import type { AgentPoolStats, AgentConfig, AgentHostMetrics, AgentAdminListItem } from '@/api/admin/agents'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
 
-const agents = ref<AgentState[]>([])
+const agents = ref<AgentAdminListItem[]>([])
 const pool = ref<AgentPoolStats>({ free_gb: 0, active: 0, queued: 0, archived: 0 })
 const loading = ref(false)
 
@@ -422,9 +478,46 @@ const downloadArchive = async (userId: number) => {
   }
 }
 
+// ── Agent 后端硬件监控（30s 轮询，#328）──
+const metrics = ref<AgentHostMetrics | null>(null)
+const metricsError = ref(false)
+let metricsTimer: ReturnType<typeof setInterval> | null = null
+
+const loadMetrics = async () => {
+  try {
+    metrics.value = await agentAdminAPI.getAgentMetrics()
+    metricsError.value = false
+  } catch (e) {
+    metricsError.value = true
+  }
+}
+
+const gaugeTextClass = (p: number): string =>
+  p >= 90 ? 'text-red-600' : p >= 70 ? 'text-yellow-600' : 'text-green-600'
+const gaugeBarClass = (p: number): string =>
+  p >= 90 ? 'bg-red-500' : p >= 70 ? 'bg-yellow-500' : 'bg-green-500'
+const fmtMB = (mb?: number): string => {
+  if (!mb && mb !== 0) return '—'
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB'
+}
+const fmtUptime = (s?: number): string => {
+  if (!s) return '—'
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  return d > 0 ? `${d}d ${h}h` : `${h}h ${Math.floor((s % 3600) / 60)}m`
+}
+
 onMounted(() => {
   refresh()
   loadGlobalConfig()
+  loadMetrics()
+  // 连续两次采样后 cpu_percent 才是真实差分值，5s 后补一拍再进入 30s 周期
+  setTimeout(loadMetrics, 5000)
+  metricsTimer = setInterval(loadMetrics, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (metricsTimer) clearInterval(metricsTimer)
 })
 </script>
 

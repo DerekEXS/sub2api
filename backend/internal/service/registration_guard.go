@@ -487,6 +487,7 @@ type RegEvaluateInput struct {
 // RegDecision 评分结果。
 type RegDecision struct {
 	UserID    int64  `json:"user_id"`
+	Email     string `json:"email,omitempty"` // handler 层按 UserID 补全（#328：跳转/定位用邮箱）
 	Score     int    `json:"score"`
 	Strong    bool   `json:"strong"`
 	Invited   bool   `json:"invited"`

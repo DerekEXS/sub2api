@@ -278,7 +278,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	agentStore := service.NewSQLAgentStore(db)
 	agentManagerInterface := service.ProvideAgentManagerClient(configConfig)
 	agentKeyProvisioner := service.NewAPIKeyAgentProvisioner(apiKeyService, channelService)
-	agentService := service.NewAgentService(agentStore, agentManagerInterface, agentKeyProvisioner, configConfig)
+	agentService := service.NewAgentService(agentStore, agentManagerInterface, agentKeyProvisioner, userRepository, configConfig)
 	agentAdminHandler := admin.NewAgentAdminHandler(agentService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	ollamaCloudUsageService := service.ProvideOllamaCloudUsageService(accountRepository, httpUpstream, settingService, secretEncryptor, configConfig, leaderLockCache, db)

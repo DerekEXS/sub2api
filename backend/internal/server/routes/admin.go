@@ -856,6 +856,7 @@ func registerAgentAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	agents := admin.Group("/agents")
 	{
 		agents.GET("", h.Admin.Agent.List)
+		agents.GET("/metrics", h.Admin.Agent.Metrics)
 		agents.GET("/config", h.Admin.Agent.GetConfig)
 		agents.PUT("/config", h.Admin.Agent.UpdateConfig)
 		agents.DELETE("/:user_id", h.Admin.Agent.Delete)

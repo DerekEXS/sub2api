@@ -3,6 +3,7 @@ package admin
 import (
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -63,7 +64,9 @@ func (h *AgentAdminHandler) Archive(c *gin.Context) {
 	_, _ = io.Copy(c.Writer, r) // 流式透传，不缓冲
 }
 
-// RegistrationAudit GET /api/v1/admin/registration-audit — 注册风险审计名单
+// RegistrationAudit GET /api/v1/admin/registration-audit?page=N&page_size=M
+// 注册风险审计名单：按标记时间倒序 + 分页（默认 20/页，上限 100），
+// 仅对当前页条目补全邮箱（#328：跳转/人工定位用邮箱，全量补会放大 N 次用户查询）。
 func (h *AgentAdminHandler) RegistrationAudit(c *gin.Context) {
 	audit, err := service.GetRegistrationGuard().ListAudit(c.Request.Context())
 	if err != nil {
@@ -73,7 +76,38 @@ func (h *AgentAdminHandler) RegistrationAudit(c *gin.Context) {
 	if audit == nil {
 		audit = []service.RegDecision{}
 	}
-	response.Success(c, gin.H{"count": len(audit), "items": audit})
+	// 新标记在前（created_at 是 unix 秒字符串；缺失按 0 排最后）
+	sort.SliceStable(audit, func(i, j int) bool {
+		return audit[i].CreatedAt > audit[j].CreatedAt
+	})
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	total := len(audit)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	items := audit[start:end]
+	for i := range items {
+		items[i].Email = h.agentService.LookupUserEmail(c.Request.Context(), items[i].UserID)
+	}
+	response.Success(c, gin.H{
+		"count":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"items":     items,
+	})
 }
 
 // RegAuditGetConfig GET /api/v1/admin/registration-audit/config — 当前生效的注册审计配置
@@ -97,6 +131,16 @@ func (h *AgentAdminHandler) RegAuditUpdateConfig(c *gin.Context) {
 		return
 	}
 	response.Success(c, cfg)
+}
+
+// Metrics GET /api/v1/admin/agents/metrics — Agent 后端宿主硬件指标（仪表盘）
+func (h *AgentAdminHandler) Metrics(c *gin.Context) {
+	m, err := h.agentService.GetAgentMetrics(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, m)
 }
 
 // GetConfig GET /api/v1/admin/agents/config — 全局 Agent 配置

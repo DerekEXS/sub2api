@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
 // ──────────────────────────────────────────────────────────────
@@ -72,6 +73,19 @@ type AgentListResponse struct {
 	Pool   AgentPoolStats `json:"pool"`
 }
 
+// AgentAdminListItem 是管理端实例列表条目（manager 状态 + 用户身份信息，#328）。
+type AgentAdminListItem struct {
+	AgentV2State
+	Email    string `json:"email,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
+// AgentAdminListResponse 是管理端实例列表响应（含邮箱/用户名列）。
+type AgentAdminListResponse struct {
+	Agents []AgentAdminListItem `json:"agents"`
+	Pool   AgentPoolStats       `json:"pool"`
+}
+
 // AgentConfig 是可配置项（保留期/硬顶/工作空间配额/内存配额/idle 超时）。
 // 双轨语义（主人 2026-08-16 规范）：
 //   - RetainHours 保留期：每次启动刷新重计时（manager last_started_at），关停后归档保留时长
@@ -114,6 +128,8 @@ type AgentManagerInterface interface {
 	GetUserConfig(ctx context.Context, userID int64) (*AgentUserConfigResponse, error)
 	// UpdateUserConfig 更新每用户覆盖（值为 0 表示清除覆盖）。
 	UpdateUserConfig(ctx context.Context, userID int64, overrides map[string]int) (*AgentUserConfigResponse, error)
+	// Metrics 返回 Agent 后端宿主硬件指标（CPU/内存/磁盘/负载/容器数，#328 仪表盘）。
+	Metrics(ctx context.Context) (map[string]any, error)
 }
 
 // AgentKeyProvisioner 抽象用户专属 API key 的创建/吊销（可 mock）。
@@ -121,6 +137,9 @@ type AgentKeyProvisioner interface {
 	// Create 创建用户专属 key 并返回其绑定分组支持的模型名列表（供 manager 注入实例）。
 	Create(ctx context.Context, userID int64) (key string, keyID int64, models []string, err error)
 	Revoke(ctx context.Context, keyID int64) error
+	// CleanupOrphans 删除该用户名下所有名为 "Agent" 的历史遗留 key（best-effort，
+	// StartAgent 重建前调用，防止 stop 半途失败/旧版本泄漏累积孤儿 key，#328）。
+	CleanupOrphans(ctx context.Context, userID int64)
 }
 
 // Agent 是 agents 表的行（记录后端已知的实例映射，用于 key 生命周期管理）。
@@ -331,6 +350,18 @@ func (c *httpAgentManagerClient) List(ctx context.Context) (*AgentListResponse, 
 	return &out, nil
 }
 
+func (c *httpAgentManagerClient) Metrics(ctx context.Context) (map[string]any, error) {
+	raw, err := c.doJSONGet(ctx, "/v2/metrics")
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse metrics: %w", err)
+	}
+	return out, nil
+}
+
 func (c *httpAgentManagerClient) GetConfig(ctx context.Context) (*AgentConfig, error) {
 	raw, err := c.doJSONGet(ctx, "/v2/config")
 	if err != nil {
@@ -511,6 +542,29 @@ func (p *apiKeyAgentProvisioner) groupModels(ctx context.Context, group *Group) 
 	return nil
 }
 
+// agentKeyName 是 Agent 服务自动生成 key 的固定名称（清扫孤儿 key 按此名匹配）。
+const agentKeyName = "Agent"
+
+// CleanupOrphans 删除该用户名下所有名为 "Agent" 的 key（best-effort，失败仅跳过）。
+// 分页扫描用户 key 列表（每页 100，最多 10 页兜底），逐个按名删除。
+func (p *apiKeyAgentProvisioner) CleanupOrphans(ctx context.Context, userID int64) {
+	for page := 1; page <= 10; page++ {
+		keys, res, err := p.keyService.List(ctx, userID,
+			pagination.PaginationParams{Page: page, PageSize: 100}, APIKeyListFilters{})
+		if err != nil {
+			return
+		}
+		for i := range keys {
+			if keys[i].Name == agentKeyName {
+				_ = p.keyService.Delete(ctx, keys[i].ID, userID)
+			}
+		}
+		if res == nil || int64(page*100) >= res.Total {
+			return
+		}
+	}
+}
+
 func (p *apiKeyAgentProvisioner) Revoke(ctx context.Context, keyID int64) error {
 	if keyID <= 0 {
 		return nil
@@ -538,6 +592,7 @@ type AgentService struct {
 	store     AgentStore
 	manager   AgentManagerInterface
 	provision AgentKeyProvisioner
+	userRepo  UserRepository // 管理端列表补全邮箱/用户名（#328；可为 nil，nil 时跳过补全）
 	cfg       *config.Config
 }
 
@@ -545,12 +600,14 @@ func NewAgentService(
 	store AgentStore,
 	manager AgentManagerInterface,
 	provision AgentKeyProvisioner,
+	userRepo UserRepository,
 	cfg *config.Config,
 ) *AgentService {
 	return &AgentService{
 		store:     store,
 		manager:   manager,
 		provision: provision,
+		userRepo:  userRepo,
 		cfg:       cfg,
 	}
 }
@@ -611,10 +668,15 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 			state.AgentURL = s.agentURL(st)
 			return state, nil
 		}
-		// manager 无活跃实例：清掉 DB 残留行，走下方重建
+		// manager 无活跃实例：吊销残留行的旧 key + 清 DB 行，走下方重建。
+		// ⚠️ 不吊销就重建会每次泄漏一个 "Agent" key（#328 实测：测试号积累 11 个孤儿 key）。
+		_ = s.provision.Revoke(ctx, existing.AgentKeyID)
 		_ = s.store.DeleteByUser(ctx, userID)
 		existing = nil
 	}
+	// 兜底清扫：无论 DB 行状态如何，把该用户名下所有历史遗留的 "Agent" key 清掉
+	// （行状态 error / 前次 stop 半途失败 / 旧版本泄漏的都在此收口），再创建新 key。
+	s.provision.CleanupOrphans(ctx, userID)
 
 	// 生成用户专属 key（绑定倍率最低的可用分组 + 模型列表）
 	key, keyID, models, err := s.provision.Create(ctx, userID)
@@ -753,14 +815,48 @@ func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*Agent
 	return state, nil
 }
 
-// ListAgents 返回全量实例 + 池统计（管理端）。
-func (s *AgentService) ListAgents(ctx context.Context) (*AgentListResponse, error) {
-	return s.manager.List(ctx)
+// ListAgents 返回全量实例 + 池统计（管理端），每条补全用户邮箱/用户名（#328）。
+// 用户查询失败不阻塞列表（身份列留空）。
+func (s *AgentService) ListAgents(ctx context.Context) (*AgentAdminListResponse, error) {
+	lst, err := s.manager.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &AgentAdminListResponse{Pool: lst.Pool, Agents: make([]AgentAdminListItem, 0, len(lst.Agents))}
+	for _, a := range lst.Agents {
+		item := AgentAdminListItem{AgentV2State: a}
+		if s.userRepo != nil && a.UserID > 0 {
+			if u, uerr := s.userRepo.GetByIDIncludeDeleted(ctx, a.UserID); uerr == nil && u != nil {
+				item.Email = u.Email
+				item.Username = u.Username
+			}
+		}
+		out.Agents = append(out.Agents, item)
+	}
+	return out, nil
 }
 
 // DownloadArchive 流式返回用户实例归档（管理端）。
 func (s *AgentService) DownloadArchive(ctx context.Context, userID int64) (io.Reader, error) {
 	return s.manager.Archive(ctx, userID)
+}
+
+// GetAgentMetrics 返回 Agent 后端宿主硬件指标（管理端仪表盘，#328）。
+func (s *AgentService) GetAgentMetrics(ctx context.Context) (map[string]any, error) {
+	return s.manager.Metrics(ctx)
+}
+
+// LookupUserEmail 按 ID 查用户邮箱（含已软删；查不到返回空串）。
+// 供管理端审计列表补全身份列（#328），失败不报错。
+func (s *AgentService) LookupUserEmail(ctx context.Context, userID int64) string {
+	if s.userRepo == nil || userID <= 0 {
+		return ""
+	}
+	u, err := s.userRepo.GetByIDIncludeDeleted(ctx, userID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Email
 }
 
 // GetAgentConfig 返回全局 Agent 配置（管理端）。

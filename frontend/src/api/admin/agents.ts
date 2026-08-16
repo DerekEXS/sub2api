@@ -12,13 +12,40 @@ export interface AgentPoolStats {
   archived: number
 }
 
+export interface AgentAdminListItem extends AgentState {
+  user_id?: number
+  email?: string
+  username?: string
+}
+
 export interface AgentListResponse {
-  agents: AgentState[]
+  agents: AgentAdminListItem[]
   pool: AgentPoolStats
+}
+
+/** Agent 后端宿主硬件指标（#328 仪表盘） */
+export interface AgentHostMetrics {
+  ts: number
+  cpu_percent: number
+  cpu_cores: number
+  load1: number
+  load5: number
+  load15: number
+  mem_total_mb: number
+  mem_used_mb: number
+  mem_percent: number
+  swap_total_mb: number
+  swap_used_mb: number
+  disk_total_gb: number
+  disk_used_gb: number
+  disk_percent: number
+  containers_running: number
+  uptime_seconds: number
 }
 
 export interface RegistrationAuditItem {
   user_id: number
+  email?: string
   score: number
   strong: boolean
   invited: boolean
@@ -65,10 +92,27 @@ export async function downloadAgentArchive(userId: number): Promise<void> {
 }
 
 /**
- * 注册风险审计名单
+ * 注册风险审计名单（分页，默认 20/页）
  */
-export async function listRegistrationAudit(): Promise<{ count: number; items: RegistrationAuditItem[] }> {
-  const { data } = await apiClient.get<{ count: number; items: RegistrationAuditItem[] }>('/admin/registration-audit')
+export interface RegistrationAuditPage {
+  count: number
+  page: number
+  page_size: number
+  items: RegistrationAuditItem[]
+}
+
+export async function listRegistrationAudit(page = 1, pageSize = 20): Promise<RegistrationAuditPage> {
+  const { data } = await apiClient.get<RegistrationAuditPage>('/admin/registration-audit', {
+    params: { page, page_size: pageSize },
+  })
+  return data
+}
+
+/**
+ * Agent 后端宿主硬件指标
+ */
+export async function getAgentMetrics(): Promise<AgentHostMetrics> {
+  const { data } = await apiClient.get<AgentHostMetrics>('/admin/agents/metrics')
   return data
 }
 
@@ -142,6 +186,7 @@ export async function updateAgentUserConfig(userId: number, overrides: Record<st
 
 export const agentAdminAPI = {
   listAgents,
+  getAgentMetrics,
   deleteAgent,
   downloadAgentArchive,
   listRegistrationAudit,

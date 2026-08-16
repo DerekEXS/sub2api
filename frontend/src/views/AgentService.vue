@@ -1,8 +1,8 @@
 <template>
   <AppLayout>
-  <!-- 根容器 flex flex-col + min-h 填满「侧边栏/顶栏之外」的可用区域（iframe 需撑满剩余空间） -->
-  <div class="agent-service-container p-6 flex flex-col min-h-[calc(100vh-8rem)]">
-    <div class="max-w-4xl mx-auto w-full flex flex-col flex-1 min-h-0">
+  <!-- 根容器：max-w-7xl 放宽（WebUI 需要大画幅），iframe 尺寸由 aspect-video 按宽驱动 -->
+  <div class="agent-service-container p-6">
+    <div class="max-w-7xl mx-auto w-full">
       <h1 class="text-2xl font-bold mb-2">{{ t('agentService.title') }}</h1>
       <p class="text-gray-600 dark:text-gray-400 mb-6 text-sm">{{ t('agentService.description') }}</p>
 
@@ -83,12 +83,14 @@
         </div>
       </div>
 
-      <!-- Agent WebUI：同源 iframe 直接嵌入（不暴露任何 IP/URL），flex-1 填满剩余区域 -->
-      <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4 flex flex-col flex-1 min-h-0 mb-6">
+      <!-- Agent WebUI：同源 iframe 直接嵌入（不暴露任何 IP/URL）。
+           16:9 大画幅：aspect-video 按容器宽驱动高度（max-w-7xl 下 ≈1216×684），
+           min-h 兜底小屏，max-h 防超高屏幕溢出视口。 -->
+      <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4 mb-6">
         <h3 class="text-lg font-medium mb-3">{{ t('agentService.agentUiTitle') }}</h3>
         <iframe
           :src="`/api/v1/agent/ui/?cz_token=${uiSessionToken}`"
-          class="w-full flex-1 min-h-[480px] border rounded-md"
+          class="w-full aspect-video min-h-[540px] max-h-[calc(100vh-14rem)] border rounded-md"
           title="PicoClaw Agent"
         ></iframe>
       </div>
@@ -184,9 +186,11 @@ const badgeClass = computed(() => {
  * 之后由 nowTs 时钟逐秒递减）；>= 1e10 视为绝对时间戳直接使用
  * （后端 S5 并行改造后直接返回绝对时间戳，前端归一化兼容两者）。
  */
+// 阈值 1e9：manager 返回绝对 unix 秒（~1.7e9 > 1e9）原样用；小值视为相对秒数锚定。
+// ⚠️ 此前写 1e10 把绝对时间戳误判为相对秒又加一遍 now → 倒计时显示 ~50 万小时（#328）。
 const normalizeDeadline = (v?: number): number => {
   if (!v || v <= 0) return 0
-  return v < 1e10 ? Math.floor(Date.now() / 1000) + v : v
+  return v < 1e9 ? Math.floor(Date.now() / 1000) + v : v
 }
 
 /**

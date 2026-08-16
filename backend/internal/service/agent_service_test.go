@@ -212,6 +212,10 @@ func (m *mockAgentManagerV2) List(ctx context.Context) (*AgentListResponse, erro
 	return &AgentListResponse{Agents: agents, Pool: AgentPoolStats{FreeGB: 20, Active: len(agents), Queued: 0, Archived: 3}}, nil
 }
 
+func (m *mockAgentManagerV2) Metrics(ctx context.Context) (map[string]any, error) {
+	return map[string]any{"cpu_percent": 1.0}, nil
+}
+
 func (m *mockAgentManagerV2) Archive(ctx context.Context, userID int64) (io.Reader, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -249,6 +253,8 @@ func (p *mockAgentProvisionerV2) Create(ctx context.Context, userID int64) (stri
 	p.created++
 	return "sk-agent-test-v2-" + itoa(int64(p.created)), int64(2000 + p.created), []string{"deepseek-v4-flash"}, nil
 }
+
+func (p *mockAgentProvisionerV2) CleanupOrphans(ctx context.Context, userID int64) {}
 
 func (p *mockAgentProvisionerV2) Revoke(ctx context.Context, keyID int64) error {
 	p.mu.Lock()
@@ -310,7 +316,7 @@ func newTestAgentServiceV2(mgr *mockAgentManagerV2, prov *mockAgentProvisionerV2
 	cfg.Agent.ManagerToken = "test-token"
 	cfg.Agent.ModelBaseURL = "http://host.docker.internal:18080/v1"
 	cfg.Agent.PublicURLBase = "http://192.168.31.90"
-	return NewAgentService(store, mgr, prov, cfg)
+	return NewAgentService(store, mgr, prov, nil, cfg)
 }
 
 func TestAgentServiceV2StartActive(t *testing.T) {
@@ -589,7 +595,7 @@ func TestAgentServiceV2ListAndArchive(t *testing.T) {
 }
 
 func TestAgentServiceV2NotConfigured(t *testing.T) {
-	svc := NewAgentService(newMockAgentStoreV2(), newMockAgentManagerV2(), &mockAgentProvisionerV2{}, &config.Config{})
+	svc := NewAgentService(newMockAgentStoreV2(), newMockAgentManagerV2(), &mockAgentProvisionerV2{}, nil, &config.Config{})
 	if _, err := svc.StartAgent(context.Background(), 1); err == nil {
 		t.Fatal("StartAgent should fail when agent config missing")
 	}
