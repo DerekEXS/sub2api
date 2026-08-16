@@ -160,7 +160,9 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': {
           target: backendUrl,
-          changeOrigin: true
+          changeOrigin: true,
+          // Agent WebUI 的聊天 WS 经 /api/v1/agent/ui/pico/ws 反代（#327）
+          ws: true
         },
         '/v1': {
           target: backendUrl,

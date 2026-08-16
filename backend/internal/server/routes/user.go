@@ -105,8 +105,10 @@ func RegisterUserRoutes(
 		// 读取用户，因此必须挂在认证中间件之后（此处独立于 authenticated 组注册）。
 		agentUI := v1.Group("/agent/ui", gin.HandlerFunc(agentUIAuth))
 		{
-			agentUI.GET("", h.Agent.UI)       // 实例 Web UI 反向代理（vhost）
-			agentUI.GET("/*path", h.Agent.UI) // Web UI 子路径 + WebSocket 透传
+			// Any：launcher WebUI 的 API 走 POST（/api/auth/login 等）、
+			// 配置保存走 PUT/DELETE，仅 GET 会导致登录请求 404（#327 实测）。
+			agentUI.Any("", h.Agent.UI)       // 实例 Web UI 反向代理（vhost）
+			agentUI.Any("/*path", h.Agent.UI) // Web UI 子路径 + WebSocket 透传
 		}
 
 		// 用户可用渠道（非管理员接口）
