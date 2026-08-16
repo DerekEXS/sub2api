@@ -72,8 +72,37 @@ export async function listRegistrationAudit(): Promise<{ count: number; items: R
   return data
 }
 
+/**
+ * 注册风险审计规则配置（S5 后端并行开发，GET/PUT /admin/registration-audit/config）
+ */
+export interface RegistrationAuditConfig {
+  ua_check_enabled: boolean // UA 检查开关
+  cgnat_exempt: boolean // CGNAT 豁免开关
+  flag_threshold: number // 打标阈值
+  strong_threshold: number // 强标阈值
+  email_long_local_min: number // 邮箱长本地最小长度
+  email_vowel_ratio_max: number // 邮箱元音最大比例（0-1）
+  score_email_random: number // 随机邮箱分值（允许负数）
+  score_email_alias: number // 别名邮箱分值（允许负数）
+  score_email_whitelist: number // 白名单邮箱分值（允许负数）
+  score_rhythm: number // 注册节奏分值（允许负数）
+  score_24h_4_5: number // 24h 4-5 次注册分值（允许负数）
+  score_24h_6_plus: number // 24h 6 次以上注册分值（允许负数）
+}
+
+export async function getRegistrationAuditConfig(): Promise<RegistrationAuditConfig> {
+  const { data } = await apiClient.get<RegistrationAuditConfig>('/admin/registration-audit/config')
+  return data
+}
+
+export async function updateRegistrationAuditConfig(cfg: RegistrationAuditConfig): Promise<RegistrationAuditConfig> {
+  const { data } = await apiClient.put<RegistrationAuditConfig>('/admin/registration-audit/config', cfg)
+  return data
+}
+
 export interface AgentConfig {
-  data_retention_hours: number
+  retain_hours: number // 关闭后保留期（小时，默认 72）
+  hardcap_hours: number // 硬顶（小时，自首次启动起算，默认 168）
   workspace_quota_mb: number
   memory_mb: number
   idle_timeout_minutes: number
@@ -116,6 +145,8 @@ export const agentAdminAPI = {
   deleteAgent,
   downloadAgentArchive,
   listRegistrationAudit,
+  getRegistrationAuditConfig,
+  updateRegistrationAuditConfig,
   getAgentConfig,
   updateAgentConfig,
   getAgentUserConfig,

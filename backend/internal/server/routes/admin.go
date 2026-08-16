@@ -870,5 +870,7 @@ func registerRegistrationAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers
 	audit := admin.Group("/registration-audit")
 	{
 		audit.GET("", h.Admin.Agent.RegistrationAudit)
+		audit.GET("/config", h.Admin.Agent.RegAuditGetConfig)
+		audit.PUT("/config", h.Admin.Agent.RegAuditUpdateConfig)
 	}
 }

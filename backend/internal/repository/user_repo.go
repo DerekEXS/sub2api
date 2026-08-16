@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -528,14 +529,18 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		q = q.Where(dbuser.RoleEQ(filters.Role))
 	}
 	if filters.Search != "" {
-		q = q.Where(
-			dbuser.Or(
-				dbuser.EmailContainsFold(filters.Search),
-				dbuser.UsernameContainsFold(filters.Search),
-				dbuser.NotesContainsFold(filters.Search),
-				dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
-			),
-		)
+		searchConds := []predicate.User{
+			dbuser.EmailContainsFold(filters.Search),
+			dbuser.UsernameContainsFold(filters.Search),
+			dbuser.NotesContainsFold(filters.Search),
+			dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
+		}
+		// S6: 纯数字 search 视为 user_id 精确过滤（前端审计表跳转 /admin/users?search=<id>）。
+		// 与模糊匹配合并为 Or，数字串同时可命中邮箱/用户名里的同名数字。
+		if id, err := strconv.ParseInt(strings.TrimSpace(filters.Search), 10, 64); err == nil && id > 0 {
+			searchConds = append(searchConds, dbuser.IDEQ(id))
+		}
+		q = q.Where(dbuser.Or(searchConds...))
 	}
 
 	if filters.GroupName != "" {

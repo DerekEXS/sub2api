@@ -1,7 +1,8 @@
 <template>
   <AppLayout>
-  <div class="agent-service-container p-6">
-    <div class="max-w-4xl mx-auto">
+  <!-- 根容器 flex flex-col + min-h 填满「侧边栏/顶栏之外」的可用区域（iframe 需撑满剩余空间） -->
+  <div class="agent-service-container p-6 flex flex-col min-h-[calc(100vh-8rem)]">
+    <div class="max-w-4xl mx-auto w-full flex flex-col flex-1 min-h-0">
       <h1 class="text-2xl font-bold mb-2">{{ t('agentService.title') }}</h1>
       <p class="text-gray-600 dark:text-gray-400 mb-6 text-sm">{{ t('agentService.description') }}</p>
 
@@ -82,12 +83,12 @@
         </div>
       </div>
 
-      <!-- Agent WebUI：同源 iframe 直接嵌入（不暴露任何 IP/URL） -->
-      <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4">
+      <!-- Agent WebUI：同源 iframe 直接嵌入（不暴露任何 IP/URL），flex-1 填满剩余区域 -->
+      <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4 flex flex-col flex-1 min-h-0 mb-6">
         <h3 class="text-lg font-medium mb-3">{{ t('agentService.agentUiTitle') }}</h3>
         <iframe
           :src="'/api/v1/agent/ui/'"
-          class="w-full h-[600px] border rounded-md"
+          class="w-full flex-1 min-h-[480px] border rounded-md"
           title="PicoClaw Agent"
         ></iframe>
       </div>
@@ -98,7 +99,7 @@
         <h3 class="text-lg font-medium mb-2">{{ t('agentService.emptyTitle') }}</h3>
         <p class="text-gray-600 dark:text-gray-400 mb-4">{{ t('agentService.emptyHint') }}</p>
         <p class="text-sm text-gray-500 dark:text-gray-500">
-          {{ t('agentService.emptyNote', { X: idleTimeoutMinutes, Y: dataRetentionHours }) }}
+          {{ t('agentService.emptyNote', { X: idleTimeoutMinutes, Y: retainHours, Z: hardcapHours }) }}
         </p>
       </div>
     </div>
@@ -130,7 +131,8 @@ const idleDeadline = ref(0)
 const retainDeadline = ref(0)
 const hardcapDeadline = ref(0)
 const idleTimeoutMinutes = ref(30) // 后端未提供时默认 30 分钟
-const dataRetentionHours = ref(72) // 后端未提供时默认 72 小时
+const retainHours = ref(72) // 关闭后保留期（小时），后端未提供时默认 72
+const hardcapHours = ref(168) // 硬顶（小时，自首次启动起算），后端未提供时默认 168
 const errorMessage = ref('')
 const copied = ref(false)
 const nowTs = ref(Math.floor(Date.now() / 1000))
@@ -174,14 +176,22 @@ const badgeClass = computed(() => {
 })
 
 /**
- * 倒计时格式化：兼容两种 deadline 格式
- * - 相对秒数（< 10^10，如 259200）= now + deadline 秒
- * - unix 时间戳（>= 10^10）
+ * 相对秒数（< 1e10）一次性归一化为绝对 unix 时间戳（仅在 applyState 时锚定，
+ * 之后由 nowTs 时钟逐秒递减）；>= 1e10 视为绝对时间戳直接使用
+ * （后端 S5 并行改造后直接返回绝对时间戳，前端归一化兼容两者）。
+ */
+const normalizeDeadline = (v?: number): number => {
+  if (!v || v <= 0) return 0
+  return v < 1e10 ? Math.floor(Date.now() / 1000) + v : v
+}
+
+/**
+ * 倒计时格式化：deadline 一律为绝对时间戳（applyState 已归一化相对秒数）。
+ * diff = deadline - nowTs，随 nowTs 时钟每秒递减。
  */
 const fmtCountdown = (deadline: number): string => {
   if (!deadline) return ''
-  const abs = deadline < 1e10 ? nowTs.value + deadline : deadline
-  const diff = Math.max(0, abs - nowTs.value)
+  const diff = Math.max(0, deadline - nowTs.value)
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
   const s = diff % 60
@@ -207,11 +217,15 @@ const stopPolling = () => {
 const applyState = (state: AgentState) => {
   accessPassword.value = state.access_password || ''
   position.value = state.position || 0
-  idleDeadline.value = state.idle_deadline || 0
-  retainDeadline.value = state.retain_deadline || 0
-  hardcapDeadline.value = state.hardcap_deadline || 0
+  // 相对秒数只在 applyState 时归一化一次，避免 fmtCountdown 每次 tick 都
+  // now+deadline-now 恒等导致倒计时永远不走（#324 改动 1）
+  idleDeadline.value = normalizeDeadline(state.idle_deadline)
+  retainDeadline.value = normalizeDeadline(state.retain_deadline)
+  hardcapDeadline.value = normalizeDeadline(state.hardcap_deadline)
   idleTimeoutMinutes.value = state.idle_timeout_minutes || 30
-  dataRetentionHours.value = state.data_retention_hours || 72
+  // S5 新字段优先；旧字段 data_retention_hours 兜底兼容
+  retainHours.value = state.retain_hours ?? state.data_retention_hours ?? 72
+  hardcapHours.value = state.hardcap_hours || 168
 }
 
 const startClock = () => {
@@ -363,6 +377,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .agent-service-container {
-  min-height: calc(100vh - 4rem);
+  /* 与 AppLayout main 的 p-4/md:p-6/lg:p-8 配合：main 高度 = 视口 - 顶栏 - 上下内边距 */
+  min-height: calc(100vh - 8rem);
 }
 </style>

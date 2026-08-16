@@ -774,6 +774,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -812,6 +813,7 @@ import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryM
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
+const route = useRoute()
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>
@@ -1835,6 +1837,11 @@ onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
   loadSavedColumns()
+  // 支持从其他页面带 search 查询参数跳转（如注册风险审计表点击用户 ID）
+  const searchParam = route.query.search
+  if (typeof searchParam === 'string' && searchParam) {
+    searchQuery.value = searchParam
+  }
   loadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()

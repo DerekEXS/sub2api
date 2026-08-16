@@ -39,8 +39,8 @@ type mockAgentManagerV2 struct {
 func (m *mockAgentManagerV2) GetConfig(ctx context.Context) (*AgentConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.config.DataRetentionHours == 0 {
-		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}, nil
+	if m.config.RetainHours == 0 {
+		return &AgentConfig{RetainHours: 72, HardcapHours: 168, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}, nil
 	}
 	cp := m.config
 	return &cp, nil
@@ -49,8 +49,11 @@ func (m *mockAgentManagerV2) GetConfig(ctx context.Context) (*AgentConfig, error
 func (m *mockAgentManagerV2) UpdateConfig(ctx context.Context, cfg AgentConfig) (*AgentConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if cfg.DataRetentionHours > 0 {
-		m.config.DataRetentionHours = cfg.DataRetentionHours
+	if cfg.RetainHours > 0 {
+		m.config.RetainHours = cfg.RetainHours
+	}
+	if cfg.HardcapHours > 0 {
+		m.config.HardcapHours = cfg.HardcapHours
 	}
 	if cfg.WorkspaceQuotaMB > 0 {
 		m.config.WorkspaceQuotaMB = cfg.WorkspaceQuotaMB
@@ -66,8 +69,8 @@ func (m *mockAgentManagerV2) UpdateConfig(ctx context.Context, cfg AgentConfig) 
 }
 
 func (m *mockAgentManagerV2) globalLocked() *AgentConfig {
-	if m.config.DataRetentionHours == 0 {
-		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}
+	if m.config.RetainHours == 0 {
+		return &AgentConfig{RetainHours: 72, HardcapHours: 168, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}
 	}
 	cp := m.config
 	return &cp
@@ -80,8 +83,11 @@ func (m *mockAgentManagerV2) GetUserConfig(ctx context.Context, userID int64) (*
 	ov := m.overrides[userID]
 	eff := *g
 	if ov != nil {
-		if v, ok := ov["data_retention_hours"]; ok && v > 0 {
-			eff.DataRetentionHours = v
+		if v, ok := ov["retain_hours"]; ok && v > 0 {
+			eff.RetainHours = v
+		}
+		if v, ok := ov["hardcap_hours"]; ok && v > 0 {
+			eff.HardcapHours = v
 		}
 		if v, ok := ov["workspace_quota_mb"]; ok && v > 0 {
 			eff.WorkspaceQuotaMB = v
@@ -117,8 +123,10 @@ func (m *mockAgentManagerV2) UpdateUserConfig(ctx context.Context, userID int64,
 	eff := *g
 	for k, v := range ov {
 		switch k {
-		case "data_retention_hours":
-			eff.DataRetentionHours = v
+		case "retain_hours":
+			eff.RetainHours = v
+		case "hardcap_hours":
+			eff.HardcapHours = v
 		case "workspace_quota_mb":
 			eff.WorkspaceQuotaMB = v
 		case "memory_mb":
@@ -157,8 +165,8 @@ func (m *mockAgentManagerV2) Create(ctx context.Context, userID int64, apiKey st
 		AccessHost:         "agent-" + itoa(userID) + ".agent.cloudzone-api.cyou",
 		AccessPassword:     "pwd-test",
 		IdleDeadline:       time.Now().Add(time.Hour).Unix(),
-		RetainDeadline:     time.Now().Add(24 * time.Hour).Unix(),
-		HardcapDeadline:    time.Now().Add(72 * time.Hour).Unix(),
+		RetainDeadline:     time.Now().Add(72 * time.Hour).Unix(),  // 保留期（每次启动刷新）
+		HardcapDeadline:    time.Now().Add(168 * time.Hour).Unix(), // 硬顶（从首次激活起算）
 		IdleTimeoutMinutes: 30,
 		DataRetentionHours: 72,
 	}
@@ -594,21 +602,21 @@ func TestAgentServiceV2Config(t *testing.T) {
 	svc := newTestAgentServiceV2(mgr, prov, store)
 	ctx := context.Background()
 
-	// 全局配置默认值（含 idle_timeout_minutes 默认 30）
+	// 全局配置默认值（双轨：retain 72 / hardcap 168，含 idle_timeout_minutes 默认 30）
 	cfg, err := svc.GetAgentConfig(ctx)
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if cfg.DataRetentionHours != 72 || cfg.WorkspaceQuotaMB != 250 || cfg.MemoryMB != 96 || cfg.IdleTimeoutMinutes != 30 {
-		t.Fatalf("default config = %+v, want 72/250/96/30", cfg)
+	if cfg.RetainHours != 72 || cfg.HardcapHours != 168 || cfg.WorkspaceQuotaMB != 250 || cfg.MemoryMB != 96 || cfg.IdleTimeoutMinutes != 30 {
+		t.Fatalf("default config = %+v, want 72/168/250/96/30", cfg)
 	}
 
-	// 更新全局配置
-	upd, err := svc.UpdateAgentConfig(ctx, AgentConfig{DataRetentionHours: 48, WorkspaceQuotaMB: 512, MemoryMB: 128, IdleTimeoutMinutes: 45})
+	// 更新全局配置（retain/hardcap 双键）
+	upd, err := svc.UpdateAgentConfig(ctx, AgentConfig{RetainHours: 48, HardcapHours: 120, WorkspaceQuotaMB: 512, MemoryMB: 128, IdleTimeoutMinutes: 45})
 	if err != nil {
 		t.Fatalf("update config: %v", err)
 	}
-	if upd.DataRetentionHours != 48 || upd.MemoryMB != 128 || upd.IdleTimeoutMinutes != 45 {
+	if upd.RetainHours != 48 || upd.HardcapHours != 120 || upd.MemoryMB != 128 || upd.IdleTimeoutMinutes != 45 {
 		t.Fatalf("updated config = %+v", upd)
 	}
 

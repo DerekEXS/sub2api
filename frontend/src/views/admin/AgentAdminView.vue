@@ -28,11 +28,20 @@
     <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
       <h2 class="text-xl font-semibold mb-4">{{ t('admin.agent.globalConfig') }}</h2>
       <div v-if="configLoading" class="text-gray-500 text-sm">{{ t('admin.agent.loading') }}</div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <div>
-          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retainHours') }}</label>
           <input
-            v-model.number="configForm.data_retention_hours"
+            v-model.number="configForm.retain_hours"
+            type="number"
+            min="1"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
+          />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.hardcapHours') }}</label>
+          <input
+            v-model.number="configForm.hardcap_hours"
             type="number"
             min="1"
             class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
@@ -134,11 +143,20 @@
           <!-- 每用户配置行内编辑 -->
           <tr v-if="editUserId === a.user_id" class="bg-blue-50/50 dark:bg-blue-900/10 border-b border-gray-100 dark:border-dark-700">
             <td colspan="5" class="py-3 px-2">
-              <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+              <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
                 <div>
-                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retainHours') }}</label>
                   <input
-                    v-model.number="userForm.data_retention_hours"
+                    v-model.number="userForm.retain_hours"
+                    type="number"
+                    min="1"
+                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.hardcapHours') }}</label>
+                  <input
+                    v-model.number="userForm.hardcap_hours"
                     type="number"
                     min="1"
                     class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
@@ -215,12 +233,13 @@ const loading = ref(false)
 // 全局配置
 const configLoading = ref(false)
 const configSaved = ref(false)
-const configForm = ref<AgentConfig>({ data_retention_hours: 72, workspace_quota_mb: 250, memory_mb: 96, idle_timeout_minutes: 30 })
+const configForm = ref<AgentConfig>({ retain_hours: 72, hardcap_hours: 168, workspace_quota_mb: 250, memory_mb: 96, idle_timeout_minutes: 30 })
 
 // 每用户配置
 const editUserId = ref(0)
-const userForm = ref<{ data_retention_hours: number; workspace_quota_mb: number; memory_mb: number; idle_timeout_minutes: number; note: string }>({
-  data_retention_hours: 0,
+const userForm = ref<{ retain_hours: number; hardcap_hours: number; workspace_quota_mb: number; memory_mb: number; idle_timeout_minutes: number; note: string }>({
+  retain_hours: 0,
+  hardcap_hours: 0,
   workspace_quota_mb: 0,
   memory_mb: 0,
   idle_timeout_minutes: 0,
@@ -232,7 +251,8 @@ const loadGlobalConfig = async () => {
   try {
     const cfg = await agentAdminAPI.getAgentConfig()
     configForm.value = {
-      data_retention_hours: cfg.data_retention_hours ?? 72,
+      retain_hours: cfg.retain_hours ?? 72,
+      hardcap_hours: cfg.hardcap_hours ?? 168,
       workspace_quota_mb: cfg.workspace_quota_mb ?? 250,
       memory_mb: cfg.memory_mb ?? 96,
       idle_timeout_minutes: cfg.idle_timeout_minutes ?? 30,
@@ -261,15 +281,17 @@ const toggleUserConfig = async (userId: number) => {
     return
   }
   editUserId.value = userId
-  userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
+  userForm.value = { retain_hours: 0, hardcap_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
   try {
     const cfg = await agentAdminAPI.getAgentUserConfig(userId)
-    userForm.value.data_retention_hours = cfg.overrides?.data_retention_hours || 0
+    userForm.value.retain_hours = cfg.overrides?.retain_hours || 0
+    userForm.value.hardcap_hours = cfg.overrides?.hardcap_hours || 0
     userForm.value.workspace_quota_mb = cfg.overrides?.workspace_quota_mb || 0
     userForm.value.memory_mb = cfg.overrides?.memory_mb || 0
     userForm.value.idle_timeout_minutes = cfg.overrides?.idle_timeout_minutes || 0
     userForm.value.note = t('admin.agent.effectiveHint', {
-      retention: cfg.effective?.data_retention_hours ?? '—',
+      retention: cfg.effective?.retain_hours ?? '—',
+      hardcap: cfg.effective?.hardcap_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
       idle: cfg.effective?.idle_timeout_minutes ?? '—',
@@ -283,13 +305,15 @@ const saveUserConfig = async () => {
   if (!editUserId.value) return
   try {
     const cfg = await agentAdminAPI.updateAgentUserConfig(editUserId.value, {
-      data_retention_hours: userForm.value.data_retention_hours,
+      retain_hours: userForm.value.retain_hours,
+      hardcap_hours: userForm.value.hardcap_hours,
       workspace_quota_mb: userForm.value.workspace_quota_mb,
       memory_mb: userForm.value.memory_mb,
       idle_timeout_minutes: userForm.value.idle_timeout_minutes,
     })
     userForm.value.note = t('admin.agent.effectiveHint', {
-      retention: cfg.effective?.data_retention_hours ?? '—',
+      retention: cfg.effective?.retain_hours ?? '—',
+      hardcap: cfg.effective?.hardcap_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
       idle: cfg.effective?.idle_timeout_minutes ?? '—',
@@ -303,14 +327,16 @@ const clearUserConfig = async () => {
   if (!editUserId.value) return
   try {
     const cfg = await agentAdminAPI.updateAgentUserConfig(editUserId.value, {
-      data_retention_hours: 0,
+      retain_hours: 0,
+      hardcap_hours: 0,
       workspace_quota_mb: 0,
       memory_mb: 0,
       idle_timeout_minutes: 0,
     })
-    userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
+    userForm.value = { retain_hours: 0, hardcap_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
     userForm.value.note = t('admin.agent.effectiveHint', {
-      retention: cfg.effective?.data_retention_hours ?? '—',
+      retention: cfg.effective?.retain_hours ?? '—',
+      hardcap: cfg.effective?.hardcap_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
       idle: cfg.effective?.idle_timeout_minutes ?? '—',

@@ -148,3 +148,4 @@ output/
 .vite/
 *.tar
 local-test-config-*
+backend/cmd/server/sub2api

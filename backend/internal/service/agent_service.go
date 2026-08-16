@@ -28,7 +28,7 @@ import (
 // 相比 v1（本地 agents 表 + POST /v1/create）的差异：
 //   - v1 的 orphaned 语义（destroy 失败保留 DB 记录待重试）由 manager 侧接管，
 //     本服务仅把 manager 的错误透传给调用方，并保留行状态 error 供审计。
-//   - 生命周期计时器（1h idle 销毁 / 24h 保留 / 72h 硬顶）在 manager 侧执行。
+//   - 生命周期计时器（idle 销毁 / retain 保留期 / hardcap 硬顶）在 manager 侧执行。
 //
 // 依赖均为接口（AgentManagerInterface / AgentKeyProvisioner / AgentStore），
 // 单测用 mock/fake 覆盖（201/202/200/404/manager 500/archive 流式）。
@@ -72,9 +72,14 @@ type AgentListResponse struct {
 	Pool   AgentPoolStats `json:"pool"`
 }
 
-// AgentConfig 是可配置项（数据保留时长/工作空间配额/内存配额/idle 超时）。
+// AgentConfig 是可配置项（保留期/硬顶/工作空间配额/内存配额/idle 超时）。
+// 双轨语义（主人 2026-08-16 规范）：
+//   - RetainHours 保留期：每次启动刷新重计时（manager last_started_at），关停后归档保留时长
+//   - HardcapHours 硬顶：从首次激活（first_activated_at）起算，永不清零，到期强制销毁+清数据
+// 旧键 data_retention_hours 由 manager 侧读入时映射为 hardcap_hours（向后兼容）。
 type AgentConfig struct {
-	DataRetentionHours int `json:"data_retention_hours"`
+	RetainHours        int `json:"retain_hours"`
+	HardcapHours       int `json:"hardcap_hours"`
 	WorkspaceQuotaMB   int `json:"workspace_quota_mb"`
 	MemoryMB           int `json:"memory_mb"`
 	IdleTimeoutMinutes int `json:"idle_timeout_minutes"`

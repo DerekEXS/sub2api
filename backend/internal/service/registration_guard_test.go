@@ -321,6 +321,140 @@ func TestRegistrationGuardBurnRate(t *testing.T) {
 	}
 }
 
+// ── 审计配置（可配置评分参数 regaudit:config）──
+
+func TestRegistrationAuditConfigDefaults(t *testing.T) {
+	// 无 redis -> 硬编码默认值
+	g := newRegistrationGuard(nil)
+	cfg := g.GetAuditConfig(context.Background())
+	if cfg != DefaultRegAuditConfig() {
+		t.Fatalf("default config = %+v, want %+v", cfg, DefaultRegAuditConfig())
+	}
+	// 有 redis 但 hash 空 -> 默认值
+	r := newMockRedisCounter()
+	g2 := newTestGuard(r)
+	if cfg2 := g2.GetAuditConfig(context.Background()); cfg2 != DefaultRegAuditConfig() {
+		t.Fatalf("empty-hash config = %+v, want defaults", cfg2)
+	}
+}
+
+func TestRegistrationAuditConfigRoundTrip(t *testing.T) {
+	r := newMockRedisCounter()
+	g := newTestGuard(r)
+	ctx := context.Background()
+
+	// 初始 = 默认
+	cfg := g.GetAuditConfig(ctx)
+	if cfg.FlagThreshold != 40 || cfg.Score24h6Plus != 60 || cfg.ScoreEmailWhitelist != -10 {
+		t.Fatalf("initial config = %+v", cfg)
+	}
+
+	// 部分更新：只改两个字段，其余保持默认
+	flag, strong := 55, 80
+	upd, err := g.UpdateAuditConfig(ctx, RegAuditConfigPatch{FlagThreshold: &flag, StrongThreshold: &strong})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if upd.FlagThreshold != 55 || upd.StrongThreshold != 80 || upd.ScoreRhythm != 20 || !upd.UaCheckEnabled || upd.EmailVowelRatioMax != 0.15 {
+		t.Fatalf("updated config = %+v", upd)
+	}
+
+	// hash 持久化 + 新 guard 重新读取（模拟重启后）
+	g2 := newTestGuard(r)
+	cfg2 := g2.GetAuditConfig(ctx)
+	if cfg2.FlagThreshold != 55 || cfg2.StrongThreshold != 80 || cfg2.ScoreEmailAlias != 20 || cfg2.EmailVowelRatioMax != 0.15 {
+		t.Fatalf("reloaded config = %+v", cfg2)
+	}
+
+	// 布尔/浮点字段更新
+	ua, ratio := false, 0.25
+	upd2, err := g2.UpdateAuditConfig(ctx, RegAuditConfigPatch{UaCheckEnabled: &ua, EmailVowelRatioMax: &ratio})
+	if err != nil {
+		t.Fatalf("update2: %v", err)
+	}
+	if upd2.UaCheckEnabled || upd2.EmailVowelRatioMax != 0.25 || upd2.FlagThreshold != 55 {
+		t.Fatalf("updated2 = %+v", upd2)
+	}
+
+	// 负值分数字段（白名单 -10）也正确往返
+	wl := -5
+	upd3, err := g2.UpdateAuditConfig(ctx, RegAuditConfigPatch{ScoreEmailWhitelist: &wl})
+	if err != nil {
+		t.Fatalf("update3: %v", err)
+	}
+	if upd3.ScoreEmailWhitelist != -5 {
+		t.Fatalf("updated3 whitelist score = %d, want -5", upd3.ScoreEmailWhitelist)
+	}
+	cfg3 := newTestGuard(r).GetAuditConfig(ctx)
+	if cfg3.ScoreEmailWhitelist != -5 {
+		t.Fatalf("reloaded3 whitelist score = %d, want -5", cfg3.ScoreEmailWhitelist)
+	}
+}
+
+func TestRegistrationAuditConfigEffects(t *testing.T) {
+	ctx := context.Background()
+
+	// ua_check_enabled=false：curl UA 不再被拒
+	r := newMockRedisCounter()
+	g := newTestGuard(r)
+	ua := false
+	if _, err := g.UpdateAuditConfig(ctx, RegAuditConfigPatch{UaCheckEnabled: &ua}); err != nil {
+		t.Fatalf("update ua: %v", err)
+	}
+	if g.IsBlockedUA("curl/8.5.0") {
+		t.Fatal("ua_check_enabled=false: curl UA should pass IsBlockedUA")
+	}
+	if _, err := g.Evaluate(ctx, RegEvaluateInput{UserAgent: "curl/8.5.0", IP: "1.2.3.4"}); err != nil {
+		t.Fatalf("Evaluate with ua_check_enabled=false: %v", err)
+	}
+
+	// cgnat_exempt=false：CGNAT IP 参与计数
+	r2 := newMockRedisCounter()
+	g2 := newTestGuard(r2)
+	cg := false
+	if _, err := g2.UpdateAuditConfig(ctx, RegAuditConfigPatch{CGNATExempt: &cg}); err != nil {
+		t.Fatalf("update cgnat: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := g2.Evaluate(ctx, RegEvaluateInput{UserID: int64(800 + i), IP: "100.64.5.6", UserAgent: "Mozilla/5.0 x"}); err != nil {
+			t.Fatalf("cgnat-off evaluate %d: %v", i, err)
+		}
+	}
+	if c := r2.countFor("100.64.5.6"); c != 3 {
+		t.Fatalf("cgnat_exempt=false ip count = %d, want 3", c)
+	}
+
+	// strong_threshold 下调：40 分邮箱形态即强标
+	r3 := newMockRedisCounter()
+	g3 := newTestGuard(r3)
+	st := 30
+	if _, err := g3.UpdateAuditConfig(ctx, RegAuditConfigPatch{StrongThreshold: &st}); err != nil {
+		t.Fatalf("update threshold: %v", err)
+	}
+	d3, err := g3.Evaluate(ctx, RegEvaluateInput{UserID: 900, IP: "4.4.4.4", Email: "xqkzjbvnrmlpasdf+1@example.org", UserAgent: "Mozilla/5.0 x"})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if d3.Score != 40 || !d3.Strong {
+		t.Fatalf("score=%d strong=%v, want 40/strong (strong_threshold=30)", d3.Score, d3.Strong)
+	}
+
+	// flag_threshold 上调：40 分不再打标/强标
+	r4 := newMockRedisCounter()
+	g4 := newTestGuard(r4)
+	ft := 50
+	if _, err := g4.UpdateAuditConfig(ctx, RegAuditConfigPatch{FlagThreshold: &ft}); err != nil {
+		t.Fatalf("update flag threshold: %v", err)
+	}
+	d4, err := g4.Evaluate(ctx, RegEvaluateInput{UserID: 901, IP: "4.4.4.5", Email: "xqkzjbvnrmlpasdf+1@example.org", UserAgent: "Mozilla/5.0 x"})
+	if err != nil {
+		t.Fatalf("evaluate2: %v", err)
+	}
+	if d4.Score != 40 || d4.Strong {
+		t.Fatalf("score=%d strong=%v, want 40/not-strong (flag_threshold=50)", d4.Score, d4.Strong)
+	}
+}
+
 // ── isCGNAT ──
 
 func TestIsCGNAT(t *testing.T) {

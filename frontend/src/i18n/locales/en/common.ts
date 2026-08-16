@@ -236,9 +236,10 @@ export default {
     copyButton: 'Copy',
     copied: 'Copied',
     emptyTitle: 'Agent service not started',
-    emptyHint: 'Click "Start Agent" to create and run your own PicoClaw container.',
+    emptyHint:
+      'Click "Start Agent" to create and run your dedicated PicoClaw container. A dedicated "Agent" API key is generated automatically (bound to the current best-rate group, auto-deleted when stopped); instance data is fully isolated.',
     emptyNote:
-      'Each user gets a fully isolated container environment. It is destroyed automatically after {X} minutes of idle time; data is retained for {Y} hours after shutdown. Please download your archive before destruction.',
+      'After {X} minutes of idle time the instance is automatically destroyed and enters a retention period of {Y} hours — restart within the retention period and your data is still there and you can continue working. If either the retention period or the hard cap ({Z} hours since first start) expires, all data is wiped and we bear no responsibility. While neither has expired you can always use "Download Archive" to save your workspace data.',
     startError: 'Failed to start, please retry later',
     stopError: 'Failed to stop, please retry later',
     downloadError: 'Failed to download archive',

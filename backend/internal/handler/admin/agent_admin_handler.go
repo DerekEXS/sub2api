@@ -76,6 +76,29 @@ func (h *AgentAdminHandler) RegistrationAudit(c *gin.Context) {
 	response.Success(c, gin.H{"count": len(audit), "items": audit})
 }
 
+// RegAuditGetConfig GET /api/v1/admin/registration-audit/config — 当前生效的注册审计配置
+// （有 Redis 时读 regaudit:config hash；无 Redis 返回硬编码默认值）
+func (h *AgentAdminHandler) RegAuditGetConfig(c *gin.Context) {
+	cfg := service.GetRegistrationGuard().GetAuditConfig(c.Request.Context())
+	response.Success(c, cfg)
+}
+
+// RegAuditUpdateConfig PUT /api/v1/admin/registration-audit/config — 部分更新注册审计配置
+// （仅更新 body 中出现的字段，nil 字段保持原值；返回更新后的完整配置）
+func (h *AgentAdminHandler) RegAuditUpdateConfig(c *gin.Context) {
+	var patch service.RegAuditConfigPatch
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	cfg, err := service.GetRegistrationGuard().UpdateAuditConfig(c.Request.Context(), patch)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
 // GetConfig GET /api/v1/admin/agents/config — 全局 Agent 配置
 func (h *AgentAdminHandler) GetConfig(c *gin.Context) {
 	cfg, err := h.agentService.GetAgentConfig(c.Request.Context())

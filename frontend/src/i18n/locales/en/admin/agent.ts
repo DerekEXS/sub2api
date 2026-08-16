@@ -19,7 +19,8 @@ export default {
     destroy: 'Destroy',
     destroyConfirm: 'Destroy instance of user',
     globalConfig: 'Global Config',
-    retentionHours: 'Data Retention (hours)',
+    retainHours: 'Retention Period (hours)',
+    hardcapHours: 'Hard Cap (hours)',
     quotaMB: 'Workspace Quota (MB)',
     memoryMB: 'Memory Quota (MB)',
     idleMinutes: 'Idle Timeout (minutes)',
@@ -27,6 +28,6 @@ export default {
     saved: 'Saved',
     userConfig: 'Config',
     clearOverride: 'Clear Overrides',
-    effectiveHint: 'Effective: retention {retention}h · quota {quota}MB · memory {memory}MB · idle {idle}min',
+    effectiveHint: 'Effective: retention {retention}h · hardcap {hardcap}h · quota {quota}MB · memory {memory}MB · idle {idle}min',
   },
 }

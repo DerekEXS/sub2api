@@ -19,7 +19,8 @@ export default {
     destroy: '销毁',
     destroyConfirm: '销毁用户实例',
     globalConfig: '全局配置',
-    retentionHours: '数据保留时长（小时）',
+    retainHours: '保留期（小时）',
+    hardcapHours: '硬顶（小时）',
     quotaMB: '工作空间配额（MB）',
     memoryMB: '内存配额（MB）',
     idleMinutes: '空闲超时（分钟）',
@@ -27,6 +28,6 @@ export default {
     saved: '已保存',
     userConfig: '配置',
     clearOverride: '清除覆盖',
-    effectiveHint: '生效值：保留 {retention}h · 配额 {quota}MB · 内存 {memory}MB · 空闲 {idle}min',
+    effectiveHint: '生效值：保留 {retention}h · 硬顶 {hardcap}h · 配额 {quota}MB · 内存 {memory}MB · 空闲 {idle}min',
   },
 }

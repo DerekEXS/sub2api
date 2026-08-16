@@ -1729,6 +1729,247 @@
               </div>
             </div>
             <div class="p-6">
+              <!-- 风险规则配置（可折叠） -->
+              <div
+                class="mb-6 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-600"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/50"
+                  @click="toggleAuditConfig"
+                >
+                  <div>
+                    <span class="font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.registrationAudit.configTitle") }}
+                    </span>
+                    <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.registrationAudit.configDescription") }}
+                    </p>
+                  </div>
+                  <svg
+                    :class="auditConfigOpen ? 'rotate-180' : ''"
+                    class="h-5 w-5 shrink-0 text-gray-400 transition-transform"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+                <div
+                  v-if="auditConfigOpen"
+                  class="border-t border-gray-200 px-4 py-4 dark:border-dark-600"
+                >
+                  <div
+                    v-if="auditConfigLoading"
+                    class="flex items-center gap-2 text-gray-500"
+                  >
+                    <div
+                      class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                    ></div>
+                    {{ t("common.loading") }}
+                  </div>
+                  <div v-else class="space-y-4">
+                    <!-- 开关 -->
+                    <div class="flex items-start justify-between gap-4">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">
+                          {{ t("admin.settings.registrationAudit.configUaCheck") }}
+                        </label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configUaCheckHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="registrationAuditConfig.ua_check_enabled" />
+                    </div>
+                    <div class="flex items-start justify-between gap-4">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">
+                          {{ t("admin.settings.registrationAudit.configCgnatExempt") }}
+                        </label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configCgnatExemptHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="registrationAuditConfig.cgnat_exempt" />
+                    </div>
+
+                    <!-- 阈值 / 邮箱 / 分值 -->
+                    <div
+                      class="grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 dark:border-dark-700 sm:grid-cols-2 lg:grid-cols-4"
+                    >
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configFlagThreshold") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.flag_threshold"
+                          type="number"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configStrongThreshold") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.strong_threshold"
+                          type="number"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configEmailLongLocal") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.email_long_local_min"
+                          type="number"
+                          min="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configEmailVowelRatio") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.email_vowel_ratio_max"
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScoreEmailRandom") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_email_random"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScoreEmailAlias") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_email_alias"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScoreEmailWhitelist") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_email_whitelist"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScoreRhythm") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_rhythm"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScore24h45") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_24h_4_5"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.registrationAudit.configScore24h6plus") }}
+                        </label>
+                        <input
+                          v-model.number="registrationAuditConfig.score_24h_6_plus"
+                          type="number"
+                          step="1"
+                          class="input mt-1 w-full"
+                        />
+                      </div>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.registrationAudit.configScoresHint") }}
+                    </p>
+
+                    <div
+                      class="flex items-center gap-3 border-t border-gray-100 pt-4 dark:border-dark-700"
+                    >
+                      <button
+                        type="button"
+                        @click="saveRegistrationAuditConfig"
+                        :disabled="auditConfigSaving"
+                        class="btn btn-primary btn-sm"
+                      >
+                        <svg
+                          v-if="auditConfigSaving"
+                          class="mr-1 h-4 w-4 animate-spin"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            class="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            stroke-width="4"
+                          ></circle>
+                          <path
+                            class="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        {{
+                          auditConfigSaving
+                            ? t("common.saving")
+                            : t("common.save")
+                        }}
+                      </button>
+                      <span
+                        v-if="auditConfigSaved"
+                        class="text-sm text-green-600 dark:text-green-400"
+                      >
+                        ✓ {{ t("admin.settings.registrationAudit.configSaved") }}
+                      </span>
+                      <span
+                        v-if="auditConfigError"
+                        class="text-sm text-red-600 dark:text-red-400"
+                      >
+                        {{ t("admin.settings.registrationAudit.configSaveFailed") }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div
                 v-if="registrationAuditLoading"
                 class="flex items-center gap-2 text-gray-500"
@@ -1775,7 +2016,16 @@
                     :key="item.user_id"
                     class="border-b border-gray-100 dark:border-dark-700"
                   >
-                    <td class="py-2 pr-4 font-mono">{{ item.user_id }}</td>
+                    <td class="py-2 pr-4">
+                      <button
+                        type="button"
+                        class="font-mono text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400"
+                        :title="t('admin.settings.registrationAudit.gotoUser')"
+                        @click="goToUser(item.user_id)"
+                      >
+                        {{ item.user_id }}
+                      </button>
+                    </td>
                     <td class="py-2 pr-4">
                       <span
                         :class="
@@ -8851,6 +9101,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -8908,7 +9159,11 @@ import {
 } from "@/composables/useStepUp";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
-import { agentAdminAPI, type RegistrationAuditItem } from "@/api/admin/agents";
+import {
+  agentAdminAPI,
+  type RegistrationAuditItem,
+  type RegistrationAuditConfig,
+} from "@/api/admin/agents";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
@@ -8927,6 +9182,7 @@ import {
 } from "./codexFingerprintSignals";
 
 const { t, locale } = useI18n();
+const router = useRouter();
 const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
@@ -9043,6 +9299,75 @@ const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
 // === 注册风险审计（原 Agent 管理，2026-08-16 移入系统设置 > 安全与认证）===
 const registrationAuditItems = ref<RegistrationAuditItem[]>([]);
 const registrationAuditLoading = ref(false);
+
+/** 风险规则配置兜底默认值（后端未返回字段时使用；实际值以后端 GET 为准） */
+const DEFAULT_REGISTRATION_AUDIT_CONFIG: RegistrationAuditConfig = {
+  ua_check_enabled: true,
+  cgnat_exempt: true,
+  flag_threshold: 40,
+  strong_threshold: 60,
+  email_long_local_min: 24,
+  email_vowel_ratio_max: 0.5,
+  score_email_random: 15,
+  score_email_alias: 10,
+  score_email_whitelist: -20,
+  score_rhythm: 15,
+  score_24h_4_5: 20,
+  score_24h_6_plus: 40,
+};
+
+const auditConfigOpen = ref(false);
+const auditConfigLoaded = ref(false);
+const auditConfigLoading = ref(false);
+const auditConfigSaving = ref(false);
+const auditConfigSaved = ref(false);
+const auditConfigError = ref(false);
+const registrationAuditConfig = ref<RegistrationAuditConfig>({
+  ...DEFAULT_REGISTRATION_AUDIT_CONFIG,
+});
+
+const toggleAuditConfig = (): void => {
+  auditConfigOpen.value = !auditConfigOpen.value;
+  if (auditConfigOpen.value && !auditConfigLoaded.value) {
+    void loadRegistrationAuditConfig();
+  }
+};
+
+const loadRegistrationAuditConfig = async (): Promise<void> => {
+  auditConfigLoading.value = true;
+  try {
+    const cfg = await agentAdminAPI.getRegistrationAuditConfig();
+    registrationAuditConfig.value = { ...DEFAULT_REGISTRATION_AUDIT_CONFIG, ...cfg };
+    auditConfigLoaded.value = true;
+  } catch (e) {
+    console.error("Failed to load registration audit config:", e);
+  } finally {
+    auditConfigLoading.value = false;
+  }
+};
+
+const saveRegistrationAuditConfig = async (): Promise<void> => {
+  auditConfigSaving.value = true;
+  auditConfigSaved.value = false;
+  auditConfigError.value = false;
+  try {
+    const cfg = await agentAdminAPI.updateRegistrationAuditConfig({
+      ...registrationAuditConfig.value,
+    });
+    registrationAuditConfig.value = { ...cfg };
+    auditConfigSaved.value = true;
+  } catch (e) {
+    console.error("Failed to save registration audit config:", e);
+    auditConfigError.value = true;
+  } finally {
+    auditConfigSaving.value = false;
+  }
+};
+
+/** 审计表用户 ID 点击 → 跳转用户管理（携带 search 参数，管理员可进一步手动检索邮箱） */
+const goToUser = (userId: number): void => {
+  void router.push({ path: "/admin/users", query: { search: String(userId) } });
+};
 
 const fmtAuditTs = (s?: string): string => {
   if (!s) return "—";

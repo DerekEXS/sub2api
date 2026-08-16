@@ -28,7 +28,9 @@ export interface AgentState {
   hardcap_deadline?: number // unix 秒 或相对秒数
   position?: number // queued 时的排队位置
   idle_timeout_minutes?: number // 空闲自动销毁超时（分钟，供前端展示）
-  data_retention_hours?: number // 关闭后数据保留时长（小时，供前端展示）
+  retain_hours?: number // 关闭后保留期（小时，供前端展示；S5 新字段）
+  hardcap_hours?: number // 硬顶（小时，自首次启动起算；S5 新字段）
+  data_retention_hours?: number // 旧字段：关闭后数据保留时长（小时），S5 后不再返回，保留兼容
   created_at?: string
 }
 
