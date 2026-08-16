@@ -52,7 +52,19 @@ var agentUISessions sync.Map
 //   - c. cookie cz_ui_session — 查内存会话，未过期且用户仍 active 即通过。
 func NewAgentUISessionAuth(authService *service.AuthService, userService *service.UserService) AgentUISessionAuth {
 	strict := jwtAuth(authService, userService, userService, nil, nil)
+	relaxFrame := func(c *gin.Context) {
+		// 全局 SecurityHeaders 的 X-Frame-Options: DENY 与 CSP frame-ancestors 'none'
+		// 会阻止 WebUI 被同源 iframe 嵌入（"已阻止此内容"）——本中间件覆盖的
+		// /agent/ui 路径统一放宽为 frame-ancestors 'self'。handler 侧已做同样处理，
+		// 这里兜底认证失败（401）分支的响应。
+		c.Writer.Header().Del("X-Frame-Options")
+		if csp := c.Writer.Header().Get("Content-Security-Policy"); csp != "" {
+			c.Writer.Header().Set("Content-Security-Policy",
+				strings.ReplaceAll(csp, "frame-ancestors 'none'", "frame-ancestors 'self'"))
+		}
+	}
 	return AgentUISessionAuth(func(c *gin.Context) {
+		relaxFrame(c)
 		// 通道 a：Authorization: Bearer（与面板同款严格校验，失败即 401 abort）
 		if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
 			strict(c)

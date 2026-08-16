@@ -152,11 +152,17 @@ func (h *AgentHandler) UI(c *gin.Context) {
 			resp.Header.Set("Content-Security-Policy",
 				strings.ReplaceAll(csp, "frame-ancestors 'none'", "frame-ancestors 'self'"))
 		}
+		// 上游 launcher 若自带 X-Frame-Options（DENY/SAMEORIGIN 都会阻止同源 iframe 场景
+		// 之外的行为差异），统一移除——嵌入策略由本代理路径的 CSP frame-ancestors 'self' 掌控。
+		resp.Header.Del("X-Frame-Options")
 		return nil
 	}
-	// 去掉全局 SecurityHeaders 中间件已设置的 CSP（httputil 复制上游头用 Add 语义，
-	// 双 CSP 并存时浏览器取交集，frame-ancestors 仍会被 'none' 锁死），
-	// 由 ModifyResponse 输出重写后的上游 CSP 单策略。
+	// 去掉全局 SecurityHeaders 中间件已设置的 CSP 与 X-Frame-Options：
+	// - CSP：httputil 复制上游头用 Add 语义，双 CSP 并存浏览器取交集，
+	//   frame-ancestors 仍会被 'none' 锁死；由 ModifyResponse 输出重写后的单策略。
+	// - X-Frame-Options: DENY：中间件全局加 DENY 禁止一切 iframe 嵌入，
+	//   会直接让 WebUI 显示"已阻止此内容"（#326 实测）。
 	c.Writer.Header().Del("Content-Security-Policy")
+	c.Writer.Header().Del("X-Frame-Options")
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
