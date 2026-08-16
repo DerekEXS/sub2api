@@ -24,6 +24,50 @@
       </div>
     </div>
 
+    <!-- 全局配置 -->
+    <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
+      <h2 class="text-xl font-semibold mb-4">{{ t('admin.agent.globalConfig') }}</h2>
+      <div v-if="configLoading" class="text-gray-500 text-sm">{{ t('admin.agent.loading') }}</div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
+          <input
+            v-model.number="configForm.data_retention_hours"
+            type="number"
+            min="1"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
+          />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.quotaMB') }}</label>
+          <input
+            v-model.number="configForm.workspace_quota_mb"
+            type="number"
+            min="1"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
+          />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.memoryMB') }}</label>
+          <input
+            v-model.number="configForm.memory_mb"
+            type="number"
+            min="16"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
+          />
+        </div>
+      </div>
+      <div v-if="!configLoading" class="mt-4 flex items-center gap-3">
+        <button
+          @click="saveGlobalConfig"
+          class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-sm transition-colors"
+        >
+          {{ t('admin.agent.save') }}
+        </button>
+        <span v-if="configSaved" class="text-green-600 text-sm">✓ {{ t('admin.agent.saved') }}</span>
+      </div>
+    </div>
+
     <!-- 实例列表 -->
     <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
       <div class="flex items-center justify-between mb-4">
@@ -49,7 +93,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="a in agents" :key="a.user_id" class="border-b border-gray-100 dark:border-dark-700">
+          <template v-for="a in agents" :key="a.user_id">
+          <tr class="border-b border-gray-100 dark:border-dark-700">
             <td class="py-2 pr-4 font-mono">{{ a.user_id }}</td>
             <td class="py-2 pr-4">
               <span :class="statusBadgeClass(a.status)" class="px-2 py-0.5 rounded-full text-xs">{{ a.status }}</span>
@@ -57,6 +102,12 @@
             <td class="py-2 pr-4 font-mono text-xs">{{ a.access_host || '—' }}</td>
             <td class="py-2 pr-4 font-mono text-xs">{{ fmtDeadline(a.hardcap_deadline) }}</td>
             <td class="py-2">
+              <button
+                @click="toggleUserConfig(a.user_id || 0)"
+                class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded mr-2"
+              >
+                {{ t('admin.agent.userConfig') }}
+              </button>
               <button
                 @click="downloadArchive(a.user_id || 0)"
                 class="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500 rounded mr-2"
@@ -71,6 +122,56 @@
               </button>
             </td>
           </tr>
+          <!-- 每用户配置行内编辑 -->
+          <tr v-if="editUserId === a.user_id" class="bg-blue-50/50 dark:bg-blue-900/10 border-b border-gray-100 dark:border-dark-700">
+            <td colspan="5" class="py-3 px-2">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
+                  <input
+                    v-model.number="userForm.data_retention_hours"
+                    type="number"
+                    min="1"
+                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.quotaMB') }}</label>
+                  <input
+                    v-model.number="userForm.workspace_quota_mb"
+                    type="number"
+                    min="1"
+                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.memoryMB') }}</label>
+                  <input
+                    v-model.number="userForm.memory_mb"
+                    type="number"
+                    min="16"
+                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
+                  />
+                </div>
+                <div class="flex gap-2">
+                  <button
+                    @click="saveUserConfig"
+                    class="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-xs transition-colors"
+                  >
+                    {{ t('admin.agent.save') }}
+                  </button>
+                  <button
+                    @click="clearUserConfig"
+                    class="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500 rounded-md text-xs"
+                  >
+                    {{ t('admin.agent.clearOverride') }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="userForm.note" class="mt-1 text-xs text-gray-500">{{ userForm.note }}</div>
+            </td>
+          </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -125,7 +226,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAdminAPI } from '@/api/admin/agents'
 import type { AgentState } from '@/api/agent'
-import type { AgentPoolStats, RegistrationAuditItem } from '@/api/admin/agents'
+import type { AgentPoolStats, AgentConfig, RegistrationAuditItem } from '@/api/admin/agents'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
@@ -136,6 +237,102 @@ const auditItems = ref<RegistrationAuditItem[]>([])
 const auditCount = ref(0)
 const loading = ref(false)
 const auditLoading = ref(false)
+
+// 全局配置
+const configLoading = ref(false)
+const configSaved = ref(false)
+const configForm = ref<AgentConfig>({ data_retention_hours: 72, workspace_quota_mb: 250, memory_mb: 96 })
+
+// 每用户配置
+const editUserId = ref(0)
+const userForm = ref<{ data_retention_hours: number; workspace_quota_mb: number; memory_mb: number; note: string }>({
+  data_retention_hours: 0,
+  workspace_quota_mb: 0,
+  memory_mb: 0,
+  note: '',
+})
+
+const loadGlobalConfig = async () => {
+  configLoading.value = true
+  try {
+    const cfg = await agentAdminAPI.getAgentConfig()
+    configForm.value = { ...cfg }
+  } catch (e) {
+    console.error('Failed to load agent config:', e)
+  } finally {
+    configLoading.value = false
+  }
+}
+
+const saveGlobalConfig = async () => {
+  configSaved.value = false
+  try {
+    const cfg = await agentAdminAPI.updateAgentConfig({ ...configForm.value })
+    configForm.value = { ...cfg }
+    configSaved.value = true
+  } catch (e) {
+    console.error('Failed to save agent config:', e)
+  }
+}
+
+const toggleUserConfig = async (userId: number) => {
+  if (editUserId.value === userId) {
+    editUserId.value = 0
+    return
+  }
+  editUserId.value = userId
+  userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, note: '' }
+  try {
+    const cfg = await agentAdminAPI.getAgentUserConfig(userId)
+    userForm.value.data_retention_hours = cfg.overrides?.data_retention_hours || 0
+    userForm.value.workspace_quota_mb = cfg.overrides?.workspace_quota_mb || 0
+    userForm.value.memory_mb = cfg.overrides?.memory_mb || 0
+    userForm.value.note = t('admin.agent.effectiveHint', {
+      retention: cfg.effective?.data_retention_hours ?? '—',
+      quota: cfg.effective?.workspace_quota_mb ?? '—',
+      memory: cfg.effective?.memory_mb ?? '—',
+    })
+  } catch (e) {
+    console.error('Failed to load user config:', e)
+  }
+}
+
+const saveUserConfig = async () => {
+  if (!editUserId.value) return
+  try {
+    const cfg = await agentAdminAPI.updateAgentUserConfig(editUserId.value, {
+      data_retention_hours: userForm.value.data_retention_hours,
+      workspace_quota_mb: userForm.value.workspace_quota_mb,
+      memory_mb: userForm.value.memory_mb,
+    })
+    userForm.value.note = t('admin.agent.effectiveHint', {
+      retention: cfg.effective?.data_retention_hours ?? '—',
+      quota: cfg.effective?.workspace_quota_mb ?? '—',
+      memory: cfg.effective?.memory_mb ?? '—',
+    })
+  } catch (e) {
+    console.error('Failed to save user config:', e)
+  }
+}
+
+const clearUserConfig = async () => {
+  if (!editUserId.value) return
+  try {
+    const cfg = await agentAdminAPI.updateAgentUserConfig(editUserId.value, {
+      data_retention_hours: 0,
+      workspace_quota_mb: 0,
+      memory_mb: 0,
+    })
+    userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, note: '' }
+    userForm.value.note = t('admin.agent.effectiveHint', {
+      retention: cfg.effective?.data_retention_hours ?? '—',
+      quota: cfg.effective?.workspace_quota_mb ?? '—',
+      memory: cfg.effective?.memory_mb ?? '—',
+    })
+  } catch (e) {
+    console.error('Failed to clear user config:', e)
+  }
+}
 
 const statusBadgeClass = (status: string): string => {
   switch (status) {
@@ -216,6 +413,7 @@ const downloadArchive = async (userId: number) => {
 onMounted(() => {
   refresh()
   refreshAudit()
+  loadGlobalConfig()
 })
 </script>
 

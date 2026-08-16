@@ -64,6 +64,20 @@ type AgentListResponse struct {
 	Pool   AgentPoolStats `json:"pool"`
 }
 
+// AgentConfig 是可配置项（数据保留时长/工作空间配额/内存配额）。
+type AgentConfig struct {
+	DataRetentionHours int `json:"data_retention_hours"`
+	WorkspaceQuotaMB   int `json:"workspace_quota_mb"`
+	MemoryMB           int `json:"memory_mb"`
+}
+
+// AgentUserConfigResponse 是每用户配置响应（全局 + 覆盖 + 生效值）。
+type AgentUserConfigResponse struct {
+	Global    AgentConfig         `json:"global"`
+	Overrides map[string]int      `json:"overrides"`
+	Effective AgentConfig         `json:"effective"`
+}
+
 // AgentManagerInterface 抽象 NY agent-manager daemon 的 /v2 API（可 mock）。
 type AgentManagerInterface interface {
 	// Create 请求创建实例。返回状态码语义：201=已激活 202=已排队 200=已存在（幂等）。
@@ -76,6 +90,14 @@ type AgentManagerInterface interface {
 	List(ctx context.Context) (*AgentListResponse, error)
 	// Archive 流式返回实例归档 tar.gz（io.Reader 透传）。
 	Archive(ctx context.Context, userID int64) (io.Reader, error)
+	// GetConfig 返回全局配置。
+	GetConfig(ctx context.Context) (*AgentConfig, error)
+	// UpdateConfig 更新全局配置（只更新传入的非零字段）。
+	UpdateConfig(ctx context.Context, cfg AgentConfig) (*AgentConfig, error)
+	// GetUserConfig 返回每用户配置（全局 + 覆盖 + 生效值）。
+	GetUserConfig(ctx context.Context, userID int64) (*AgentUserConfigResponse, error)
+	// UpdateUserConfig 更新每用户覆盖（值为 0 表示清除覆盖）。
+	UpdateUserConfig(ctx context.Context, userID int64, overrides map[string]int) (*AgentUserConfigResponse, error)
 }
 
 // AgentKeyProvisioner 抽象用户专属 API key 的创建/吊销（可 mock）。
@@ -286,6 +308,88 @@ func (c *httpAgentManagerClient) List(ctx context.Context) (*AgentListResponse, 
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 	return &out, nil
+}
+
+func (c *httpAgentManagerClient) GetConfig(ctx context.Context) (*AgentConfig, error) {
+	raw, err := c.doJSONGet(ctx, "/v2/config")
+	if err != nil {
+		return nil, err
+	}
+	var cfg AgentConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	return &cfg, nil
+}
+
+func (c *httpAgentManagerClient) UpdateConfig(ctx context.Context, cfg AgentConfig) (*AgentConfig, error) {
+	raw, err := c.doJSONReq(ctx, http.MethodPut, "/v2/config", cfg)
+	if err != nil {
+		return nil, err
+	}
+	var out AgentConfig
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *httpAgentManagerClient) GetUserConfig(ctx context.Context, userID int64) (*AgentUserConfigResponse, error) {
+	raw, err := c.doJSONGet(ctx, "/v2/agents/"+strconv.FormatInt(userID, 10)+"/config")
+	if err != nil {
+		return nil, err
+	}
+	var out AgentUserConfigResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse user config: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *httpAgentManagerClient) UpdateUserConfig(ctx context.Context, userID int64, overrides map[string]int) (*AgentUserConfigResponse, error) {
+	raw, err := c.doJSONReq(ctx, http.MethodPut, "/v2/agents/"+strconv.FormatInt(userID, 10)+"/config", overrides)
+	if err != nil {
+		return nil, err
+	}
+	var out AgentUserConfigResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse user config: %w", err)
+	}
+	return &out, nil
+}
+
+// doJSONGet GET 一个 /v2 JSON 端点并返回原始 JSON 字节（状态码必须 200）。
+func (c *httpAgentManagerClient) doJSONGet(ctx context.Context, path string) ([]byte, error) {
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent-manager get %s: http %d: %s", path, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return raw, nil
+}
+
+// doJSONReq 发送 JSON 请求并返回原始 JSON 字节（状态码必须 200）。
+func (c *httpAgentManagerClient) doJSONReq(ctx context.Context, method, path string, payload any) ([]byte, error) {
+	resp, err := c.do(ctx, method, path, payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent-manager %s %s: http %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return raw, nil
 }
 
 func (c *httpAgentManagerClient) Archive(ctx context.Context, userID int64) (io.Reader, error) {
@@ -534,6 +638,26 @@ func (s *AgentService) ListAgents(ctx context.Context) (*AgentListResponse, erro
 // DownloadArchive 流式返回用户实例归档（管理端）。
 func (s *AgentService) DownloadArchive(ctx context.Context, userID int64) (io.Reader, error) {
 	return s.manager.Archive(ctx, userID)
+}
+
+// GetAgentConfig 返回全局 Agent 配置（管理端）。
+func (s *AgentService) GetAgentConfig(ctx context.Context) (*AgentConfig, error) {
+	return s.manager.GetConfig(ctx)
+}
+
+// UpdateAgentConfig 更新全局 Agent 配置（管理端）。
+func (s *AgentService) UpdateAgentConfig(ctx context.Context, cfg AgentConfig) (*AgentConfig, error) {
+	return s.manager.UpdateConfig(ctx, cfg)
+}
+
+// GetAgentUserConfig 返回每用户 Agent 配置（管理端）。
+func (s *AgentService) GetAgentUserConfig(ctx context.Context, userID int64) (*AgentUserConfigResponse, error) {
+	return s.manager.GetUserConfig(ctx, userID)
+}
+
+// UpdateAgentUserConfig 更新每用户 Agent 配置覆盖（管理端；0 = 清除覆盖）。
+func (s *AgentService) UpdateAgentUserConfig(ctx context.Context, userID int64, overrides map[string]int) (*AgentUserConfigResponse, error) {
+	return s.manager.UpdateUserConfig(ctx, userID, overrides)
 }
 
 // mapRowToState 从库内记录构建状态（manager 不可达时回退用）。

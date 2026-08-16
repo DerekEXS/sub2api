@@ -72,6 +72,53 @@ export async function listRegistrationAudit(): Promise<{ count: number; items: R
   return data
 }
 
-export const agentAdminAPI = { listAgents, deleteAgent, downloadAgentArchive, listRegistrationAudit }
+export interface AgentConfig {
+  data_retention_hours: number
+  workspace_quota_mb: number
+  memory_mb: number
+}
+
+export interface AgentUserConfigResponse {
+  global: AgentConfig
+  overrides: Record<string, number>
+  effective: AgentConfig
+}
+
+/**
+ * 全局 Agent 配置
+ */
+export async function getAgentConfig(): Promise<AgentConfig> {
+  const { data } = await apiClient.get<AgentConfig>('/admin/agents/config')
+  return data
+}
+
+export async function updateAgentConfig(cfg: AgentConfig): Promise<AgentConfig> {
+  const { data } = await apiClient.put<AgentConfig>('/admin/agents/config', cfg)
+  return data
+}
+
+/**
+ * 每用户配置（覆盖 + 生效值）
+ */
+export async function getAgentUserConfig(userId: number): Promise<AgentUserConfigResponse> {
+  const { data } = await apiClient.get<AgentUserConfigResponse>(`/admin/agents/${userId}/config`)
+  return data
+}
+
+export async function updateAgentUserConfig(userId: number, overrides: Record<string, number>): Promise<AgentUserConfigResponse> {
+  const { data } = await apiClient.put<AgentUserConfigResponse>(`/admin/agents/${userId}/config`, overrides)
+  return data
+}
+
+export const agentAdminAPI = {
+  listAgents,
+  deleteAgent,
+  downloadAgentArchive,
+  listRegistrationAudit,
+  getAgentConfig,
+  updateAgentConfig,
+  getAgentUserConfig,
+  updateAgentUserConfig,
+}
 
 export default agentAdminAPI

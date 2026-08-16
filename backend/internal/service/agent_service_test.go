@@ -31,6 +31,95 @@ type mockAgentManagerV2 struct {
 	listErr     error
 	archiveErr  error
 	archiveData string
+	config      AgentConfig
+	overrides   map[int64]map[string]int
+}
+
+func (m *mockAgentManagerV2) GetConfig(ctx context.Context) (*AgentConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.config.DataRetentionHours == 0 {
+		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96}, nil
+	}
+	cp := m.config
+	return &cp, nil
+}
+
+func (m *mockAgentManagerV2) UpdateConfig(ctx context.Context, cfg AgentConfig) (*AgentConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cfg.DataRetentionHours > 0 {
+		m.config.DataRetentionHours = cfg.DataRetentionHours
+	}
+	if cfg.WorkspaceQuotaMB > 0 {
+		m.config.WorkspaceQuotaMB = cfg.WorkspaceQuotaMB
+	}
+	if cfg.MemoryMB > 0 {
+		m.config.MemoryMB = cfg.MemoryMB
+	}
+	cp := m.config
+	return &cp, nil
+}
+
+func (m *mockAgentManagerV2) globalLocked() *AgentConfig {
+	if m.config.DataRetentionHours == 0 {
+		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96}
+	}
+	cp := m.config
+	return &cp
+}
+
+func (m *mockAgentManagerV2) GetUserConfig(ctx context.Context, userID int64) (*AgentUserConfigResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g := m.globalLocked()
+	ov := m.overrides[userID]
+	eff := *g
+	if ov != nil {
+		if v, ok := ov["data_retention_hours"]; ok && v > 0 {
+			eff.DataRetentionHours = v
+		}
+		if v, ok := ov["workspace_quota_mb"]; ok && v > 0 {
+			eff.WorkspaceQuotaMB = v
+		}
+		if v, ok := ov["memory_mb"]; ok && v > 0 {
+			eff.MemoryMB = v
+		}
+	}
+	return &AgentUserConfigResponse{Global: *g, Overrides: ov, Effective: eff}, nil
+}
+
+func (m *mockAgentManagerV2) UpdateUserConfig(ctx context.Context, userID int64, overrides map[string]int) (*AgentUserConfigResponse, error) {
+	m.mu.Lock()
+	if m.overrides == nil {
+		m.overrides = map[int64]map[string]int{}
+	}
+	ov := m.overrides[userID]
+	if ov == nil {
+		ov = map[string]int{}
+	}
+	for k, v := range overrides {
+		if v <= 0 {
+			delete(ov, k)
+		} else {
+			ov[k] = v
+		}
+	}
+	m.overrides[userID] = ov
+	g := m.globalLocked()
+	eff := *g
+	for k, v := range ov {
+		switch k {
+		case "data_retention_hours":
+			eff.DataRetentionHours = v
+		case "workspace_quota_mb":
+			eff.WorkspaceQuotaMB = v
+		case "memory_mb":
+			eff.MemoryMB = v
+		}
+	}
+	m.mu.Unlock()
+	return &AgentUserConfigResponse{Global: *g, Overrides: ov, Effective: eff}, nil
 }
 
 func newMockAgentManagerV2() *mockAgentManagerV2 {
@@ -479,5 +568,49 @@ func TestAgentServiceV2NotConfigured(t *testing.T) {
 	svc := NewAgentService(newMockAgentStoreV2(), newMockAgentManagerV2(), &mockAgentProvisionerV2{}, &config.Config{})
 	if _, err := svc.StartAgent(context.Background(), 1); err == nil {
 		t.Fatal("StartAgent should fail when agent config missing")
+	}
+}
+
+func TestAgentServiceV2Config(t *testing.T) {
+	mgr := newMockAgentManagerV2()
+	prov := &mockAgentProvisionerV2{}
+	store := newMockAgentStoreV2()
+	svc := newTestAgentServiceV2(mgr, prov, store)
+	ctx := context.Background()
+
+	// 全局配置默认值
+	cfg, err := svc.GetAgentConfig(ctx)
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if cfg.DataRetentionHours != 72 || cfg.WorkspaceQuotaMB != 250 || cfg.MemoryMB != 96 {
+		t.Fatalf("default config = %+v, want 72/250/96", cfg)
+	}
+
+	// 更新全局配置
+	upd, err := svc.UpdateAgentConfig(ctx, AgentConfig{DataRetentionHours: 48, WorkspaceQuotaMB: 512, MemoryMB: 128})
+	if err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if upd.DataRetentionHours != 48 || upd.MemoryMB != 128 {
+		t.Fatalf("updated config = %+v", upd)
+	}
+
+	// 每用户覆盖
+	ucfg, err := svc.UpdateAgentUserConfig(ctx, 42, map[string]int{"memory_mb": 256})
+	if err != nil {
+		t.Fatalf("update user config: %v", err)
+	}
+	if ucfg.Effective.MemoryMB != 256 || ucfg.Effective.WorkspaceQuotaMB != 512 {
+		t.Fatalf("effective = %+v, want memory 256 (override) + quota 512 (global)", ucfg.Effective)
+	}
+
+	// 清除覆盖回退全局
+	ucfg2, err := svc.UpdateAgentUserConfig(ctx, 42, map[string]int{"memory_mb": 0})
+	if err != nil {
+		t.Fatalf("clear override: %v", err)
+	}
+	if ucfg2.Effective.MemoryMB != 128 {
+		t.Fatalf("effective after clear = %+v, want memory 128 (global)", ucfg2.Effective)
 	}
 }

@@ -75,3 +75,63 @@ func (h *AgentAdminHandler) RegistrationAudit(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"count": len(audit), "items": audit})
 }
+
+// GetConfig GET /api/v1/admin/agents/config — 全局 Agent 配置
+func (h *AgentAdminHandler) GetConfig(c *gin.Context) {
+	cfg, err := h.agentService.GetAgentConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// UpdateConfig PUT /api/v1/admin/agents/config — 更新全局 Agent 配置
+func (h *AgentAdminHandler) UpdateConfig(c *gin.Context) {
+	var req service.AgentConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	cfg, err := h.agentService.UpdateAgentConfig(c.Request.Context(), req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// GetUserConfig GET /api/v1/admin/agents/:user_id/config — 每用户配置
+func (h *AgentAdminHandler) GetUserConfig(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid user_id")
+		return
+	}
+	cfg, err := h.agentService.GetAgentUserConfig(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// UpdateUserConfig PUT /api/v1/admin/agents/:user_id/config — 每用户配置覆盖
+func (h *AgentAdminHandler) UpdateUserConfig(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid user_id")
+		return
+	}
+	var req map[string]int
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	cfg, err := h.agentService.UpdateAgentUserConfig(c.Request.Context(), userID, req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
