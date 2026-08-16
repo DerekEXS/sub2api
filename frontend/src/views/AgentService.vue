@@ -20,7 +20,7 @@
         <div class="flex gap-3">
           <button
             @click="startAgent"
-            :disabled="agentStatus === 'starting' || agentStatus === 'running'"
+            :disabled="agentStatus === 'starting' || agentStatus === 'running' || agentStatus === 'queued'"
             class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <span v-if="agentStatus === 'starting'" class="inline-block animate-spin mr-2">⚪</span>
@@ -29,12 +29,42 @@
 
           <button
             @click="stopAgent"
-            :disabled="agentStatus !== 'running'"
+            :disabled="agentStatus !== 'running' && agentStatus !== 'queued'"
             class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <span v-if="agentStatus === 'stopping'" class="inline-block animate-spin mr-2">⚪</span>
             {{ t('agentService.stopButton') }}
           </button>
+
+          <button
+            @click="downloadArchive"
+            v-if="agentStatus === 'running' || agentStatus === 'not_started'"
+            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500 text-gray-800 dark:text-gray-200 rounded-md transition-colors"
+          >
+            {{ t('agentService.downloadButton') }}
+          </button>
+        </div>
+
+        <!-- Queued / Countdown Info -->
+        <div v-if="agentStatus === 'queued'" class="mt-4 p-3 rounded-md bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-sm">
+          <span v-if="position > 0">{{ t('agentService.queuedHint') }}（#{{ position }}）</span>
+          <span v-else>{{ t('agentService.queuedProvisioning') }}</span>
+        </div>
+
+        <!-- 生命周期倒计时（active 时显示） -->
+        <div v-if="agentStatus === 'running' && (hardcapCountdown || retainCountdown)" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div v-if="idleCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
+            <div class="text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.idleLabel') }}</div>
+            <code class="font-mono text-base">{{ idleCountdown }}</code>
+          </div>
+          <div v-if="retainCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
+            <div class="text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.retainLabel') }}</div>
+            <code class="font-mono text-base">{{ retainCountdown }}</code>
+          </div>
+          <div v-if="hardcapCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
+            <div class="text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.hardcapLabel') }}</div>
+            <code class="font-mono text-base">{{ hardcapCountdown }}</code>
+          </div>
         </div>
       </div>
 
@@ -81,6 +111,14 @@
                   <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.apiEndpoint') }}</div>
                   <code class="text-sm font-mono break-all">{{ agentUrl }}</code>
                 </div>
+                <div v-if="accessHost">
+                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.accessHost') }}</div>
+                  <code class="text-sm font-mono break-all">{{ accessHost }}</code>
+                </div>
+                <div v-if="accessPassword">
+                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.accessPassword') }}</div>
+                  <code class="text-sm font-mono break-all">{{ accessPassword }}</code>
+                </div>
                 <div>
                   <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.healthCheck') }}</div>
                   <code class="text-sm font-mono break-all">{{ agentUrl }}/health</code>
@@ -122,18 +160,33 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAPI } from '@/api/agent'
+import type { AgentState } from '@/api/agent'
 
 const { t } = useI18n()
 
-type AgentUiStatus = 'not_started' | 'starting' | 'running' | 'stopping' | 'error'
+type AgentUiStatus =
+  | 'not_started'
+  | 'starting'
+  | 'running'
+  | 'queued'
+  | 'stopping'
+  | 'error'
 
 const agentStatus = ref<AgentUiStatus>('not_started')
 const agentUrl = ref('')
 const agentPort = ref(0)
+const accessHost = ref('')
+const accessPassword = ref('')
+const position = ref(0)
+const idleDeadline = ref(0)
+const retainDeadline = ref(0)
+const hardcapDeadline = ref(0)
 const errorMessage = ref('')
 const hasWebUI = ref(false)
 const healthOk = ref(false)
+const nowTs = ref(Math.floor(Date.now() / 1000))
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
 
 const statusText = computed(() => {
   switch (agentStatus.value) {
@@ -143,6 +196,8 @@ const statusText = computed(() => {
       return t('agentService.statusStarting')
     case 'running':
       return t('agentService.statusRunning')
+    case 'queued':
+      return t('agentService.statusQueued')
     case 'stopping':
       return t('agentService.statusStopping')
     case 'error':
@@ -156,6 +211,7 @@ const badgeClass = computed(() => {
   const base = 'px-3 py-1 rounded-full text-sm font-medium'
   switch (agentStatus.value) {
     case 'starting':
+    case 'queued':
       return `${base} bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200`
     case 'running':
       return `${base} bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200`
@@ -167,11 +223,39 @@ const badgeClass = computed(() => {
   }
 })
 
+const fmtCountdown = (deadline: number): string => {
+  if (!deadline) return ''
+  const diff = Math.max(0, deadline - nowTs.value)
+  const h = Math.floor(diff / 3600)
+  const m = Math.floor((diff % 3600) / 60)
+  const s = diff % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(h)}:${pad(m)}:${pad(s)}`
+}
+
+const idleCountdown = computed(() => fmtCountdown(idleDeadline.value))
+const retainCountdown = computed(() => fmtCountdown(retainDeadline.value))
+const hardcapCountdown = computed(() => fmtCountdown(hardcapDeadline.value))
+
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  if (clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
+}
+
+const applyState = (state: AgentState) => {
+  agentPort.value = state.port || 0
+  accessHost.value = state.access_host || ''
+  accessPassword.value = state.access_password || ''
+  position.value = state.position || 0
+  idleDeadline.value = state.idle_deadline || 0
+  retainDeadline.value = state.retain_deadline || 0
+  hardcapDeadline.value = state.hardcap_deadline || 0
 }
 
 /**
@@ -194,19 +278,30 @@ const probeWebUI = async (url: string) => {
   }
 }
 
+const startClock = () => {
+  nowTs.value = Math.floor(Date.now() / 1000)
+  if (!clockTimer) {
+    clockTimer = setInterval(() => {
+      nowTs.value = Math.floor(Date.now() / 1000)
+    }, 1000)
+  }
+}
+
 const startPolling = () => {
   stopPolling()
   pollTimer = setInterval(async () => {
     try {
       const state = await agentAPI.status()
-      if (state.status === 'running') {
+      if (state.status === 'active' || state.status === 'running') {
         agentStatus.value = 'running'
-        agentUrl.value = state.agent_url || ''
-        agentPort.value = state.port || 0
-      } else if (state.status === 'stopped' || state.status === 'not_started') {
+        agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
+        applyState(state)
+      } else if (state.status === 'queued' || state.status === 'provisioning') {
+        agentStatus.value = 'queued'
+        applyState(state)
+      } else if (state.status === 'stopped' || state.status === 'not_started' || state.status === 'retained') {
         agentStatus.value = 'not_started'
         agentUrl.value = ''
-        agentPort.value = 0
         stopPolling()
       }
     } catch {
@@ -218,13 +313,19 @@ const startPolling = () => {
 const syncStatus = async () => {
   try {
     const state = await agentAPI.status()
-    if (state.status === 'running') {
+    if (state.status === 'active' || state.status === 'running') {
       agentStatus.value = 'running'
-      agentUrl.value = state.agent_url || ''
-      agentPort.value = state.port || 0
+      agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
+      applyState(state)
       await probeWebUI(state.agent_url || '')
       startPolling()
-    } else if (state.status === 'stopped') {
+      startClock()
+    } else if (state.status === 'queued' || state.status === 'provisioning') {
+      agentStatus.value = 'queued'
+      applyState(state)
+      startPolling()
+      startClock()
+    } else if (state.status === 'stopped' || state.status === 'retained') {
       agentStatus.value = 'not_started'
     } else if (state.status === 'not_started') {
       agentStatus.value = 'not_started'
@@ -243,12 +344,18 @@ const startAgent = async () => {
 
   try {
     const state = await agentAPI.start()
-    if (state.status === 'running') {
+    if (state.status === 'active' || state.status === 'running') {
       agentStatus.value = 'running'
-      agentUrl.value = state.agent_url || ''
-      agentPort.value = state.port || 0
+      agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
+      applyState(state)
       await probeWebUI(state.agent_url || '')
       startPolling()
+      startClock()
+    } else if (state.status === 'queued' || state.status === 'provisioning') {
+      agentStatus.value = 'queued'
+      applyState(state)
+      startPolling()
+      startClock()
     } else {
       agentStatus.value = 'not_started'
     }
@@ -260,7 +367,7 @@ const startAgent = async () => {
 }
 
 const stopAgent = async () => {
-  if (agentStatus.value !== 'running') return
+  if (agentStatus.value !== 'running' && agentStatus.value !== 'queued') return
 
   agentStatus.value = 'stopping'
   errorMessage.value = ''
@@ -269,7 +376,7 @@ const stopAgent = async () => {
     await agentAPI.stop()
     agentStatus.value = 'not_started'
     agentUrl.value = ''
-    agentPort.value = 0
+    applyState({ status: 'not_started' })
     hasWebUI.value = false
     healthOk.value = false
     stopPolling()
@@ -277,6 +384,15 @@ const stopAgent = async () => {
     console.error('Failed to stop agent:', error)
     agentStatus.value = 'running'
     errorMessage.value = error?.message || t('agentService.stopError')
+  }
+}
+
+const downloadArchive = async () => {
+  errorMessage.value = ''
+  try {
+    await agentAPI.downloadArchive()
+  } catch (error: any) {
+    errorMessage.value = error?.message || t('agentService.downloadError')
   }
 }
 
