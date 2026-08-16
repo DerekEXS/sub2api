@@ -132,5 +132,31 @@ func (h *AgentHandler) UI(c *gin.Context) {
 		// agent-<uid>.agent.cloudzone-api.cyou 分发到该用户实例端口。
 		req.Host = fmt.Sprintf("agent-%d.agent.cloudzone-api.cyou", subject.UserID)
 	}
+	// launcher 根路径 302 到 /launcher-login 等相对路径：重写 Location 头
+	// 回到 /api/v1/agent/ui 前缀，避免浏览器跟随落到 sub2api 自身路由（#325 遗留）。
+	// 同时把 CSP 的 frame-ancestors 'none' 放开为 'self'（WebUI 需被 sub2api 同源 iframe 嵌入；
+	// 只影响本代理路径的响应，全局 CSP 不动）。
+	uiPrefix := "/api/v1/agent/ui"
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		loc := resp.Header.Get("Location")
+		if loc != "" {
+			if strings.HasPrefix(loc, "http://") || strings.HasPrefix(loc, "https://") {
+				// 绝对 URL 不动
+			} else if strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, uiPrefix) {
+				// 实例侧绝对路径 -> 加 UI 前缀
+				resp.Header.Set("Location", uiPrefix+loc)
+			}
+			// 相对路径 -> 浏览器按当前 URL 解析，保持原样
+		}
+		if csp := resp.Header.Get("Content-Security-Policy"); csp != "" {
+			resp.Header.Set("Content-Security-Policy",
+				strings.ReplaceAll(csp, "frame-ancestors 'none'", "frame-ancestors 'self'"))
+		}
+		return nil
+	}
+	// 去掉全局 SecurityHeaders 中间件已设置的 CSP（httputil 复制上游头用 Add 语义，
+	// 双 CSP 并存时浏览器取交集，frame-ancestors 仍会被 'none' 锁死），
+	// 由 ModifyResponse 输出重写后的上游 CSP 单策略。
+	c.Writer.Header().Del("Content-Security-Policy")
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
