@@ -589,9 +589,16 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.Status != "error" && existing.Status != "orphaned" {
-		state := s.mapRowToState(existing)
-		if st, err := s.manager.Get(ctx, userID); err == nil && st != nil {
+	// 幂等短路判定（#325 二修）：不仅 DB 行状态要活跃，manager 实时状态也必须
+	// active/queued/provisioning——否则（如 DB 残留 active 行但 manager 实例已被 idle
+	// 销毁成 retained）走重建，避免假短路返回无密码旧行、用户看到"无实例"。
+	if existing != nil && (existing.Status == "active" || existing.Status == "queued" ||
+		existing.Status == "provisioning" || existing.Status == "running") {
+		st, gerr := s.manager.Get(ctx, userID)
+		live := gerr == nil && st != nil &&
+			(st.Status == "active" || st.Status == "queued" || st.Status == "provisioning")
+		if live {
+			state := s.mapRowToState(existing)
 			state.AccessHost = st.AccessHost
 			state.AccessPassword = st.AccessPassword
 			state.IdleDeadline = st.IdleDeadline
@@ -602,8 +609,11 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 			state.IdleTimeoutMinutes = st.IdleTimeoutMinutes
 			state.DataRetentionHours = st.DataRetentionHours
 			state.AgentURL = s.agentURL(st)
+			return state, nil
 		}
-		return state, nil
+		// manager 无活跃实例：清掉 DB 残留行，走下方重建
+		_ = s.store.DeleteByUser(ctx, userID)
+		existing = nil
 	}
 
 	// 生成用户专属 key（绑定倍率最低的可用分组 + 模型列表）
