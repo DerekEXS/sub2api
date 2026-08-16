@@ -42,6 +42,8 @@ func ProvideRouter(
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
 	redisClient *redis.Client,
+	authService *service.AuthService,
+	userService *service.UserService,
 ) *gin.Engine {
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -90,7 +92,7 @@ func ProvideRouter(
 	// 注册 IP 多维评分 guard 注入 redis（未注入时仅 L0 UA 检查，fail-open）
 	service.SetRegistrationGuardRedis(&service.RedisCounterAdapter{Client: redisClient})
 
-	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
+	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient, authService, userService)
 }
 
 func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {

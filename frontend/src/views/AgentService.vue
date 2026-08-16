@@ -87,7 +87,7 @@
       <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4 flex flex-col flex-1 min-h-0 mb-6">
         <h3 class="text-lg font-medium mb-3">{{ t('agentService.agentUiTitle') }}</h3>
         <iframe
-          :src="'/api/v1/agent/ui/'"
+          :src="`/api/v1/agent/ui/?cz_token=${uiSessionToken}`"
           class="w-full flex-1 min-h-[480px] border rounded-md"
           title="PicoClaw Agent"
         ></iframe>
@@ -115,6 +115,10 @@ import type { AgentState } from '@/api/agent'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
+
+// iframe 会话认证 token（#326）：iframe 内请求不带 Authorization header，
+// 通过 query cz_token 由后端建立 cookie session（12h）。
+const uiSessionToken = computed(() => localStorage.getItem('auth_token') || '')
 
 type AgentUiStatus =
   | 'not_started'

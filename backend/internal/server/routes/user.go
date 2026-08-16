@@ -16,6 +16,7 @@ func RegisterUserRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	agentUIAuth middleware.AgentUISessionAuth,
 ) {
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
@@ -96,8 +97,16 @@ func RegisterUserRoutes(
 			agent.POST("/stop", h.Agent.Stop)
 			agent.GET("/status", h.Agent.Status)
 			agent.GET("/archive", h.Agent.Archive)
-			agent.GET("/ui", h.Agent.UI)        // 实例 Web UI 反向代理（vhost）
-			agent.GET("/ui/*path", h.Agent.UI)  // Web UI 子路径 + WebSocket 透传
+		}
+
+		// Agent Web UI（iframe 会话认证）：iframe 内浏览器请求不带 Authorization
+		// header，走 AgentUISessionAuth 三通道（Bearer / ?cz_token 换 HttpOnly
+		// cookie / cz_ui_session cookie）。UI handler 内部用 GetAuthSubjectFromContext
+		// 读取用户，因此必须挂在认证中间件之后（此处独立于 authenticated 组注册）。
+		agentUI := v1.Group("/agent/ui", gin.HandlerFunc(agentUIAuth))
+		{
+			agentUI.GET("", h.Agent.UI)       // 实例 Web UI 反向代理（vhost）
+			agentUI.GET("/*path", h.Agent.UI) // Web UI 子路径 + WebSocket 透传
 		}
 
 		// 用户可用渠道（非管理员接口）
