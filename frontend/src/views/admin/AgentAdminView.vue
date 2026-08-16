@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="agent-admin-container p-6">
     <h1 class="text-2xl font-bold mb-2">{{ t('admin.agent.title') }}</h1>
     <p class="text-gray-600 dark:text-gray-400 mb-6 text-sm">{{ t('admin.agent.description') }}</p>
@@ -116,6 +117,7 @@
       </table>
     </div>
   </div>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
@@ -124,6 +126,7 @@ import { useI18n } from 'vue-i18n'
 import { agentAdminAPI } from '@/api/admin/agents'
 import type { AgentState } from '@/api/agent'
 import type { AgentPoolStats, RegistrationAuditItem } from '@/api/admin/agents'
+import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
 

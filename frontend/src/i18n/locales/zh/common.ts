@@ -206,6 +206,7 @@ export default {
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
     agentService: 'Agent 服务',
+    agentAdmin: 'Agent 管理',
   },
 
   // Agent 服务（PicoClaw 容器一键部署）

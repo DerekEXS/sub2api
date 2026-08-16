@@ -206,6 +206,7 @@ export default {
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
     agentService: 'Agent Service',
+    agentAdmin: 'Agent Management',
   },
 
   // Agent Service (one-click PicoClaw container)

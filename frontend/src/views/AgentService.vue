@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="agent-service-container p-6">
     <div class="max-w-4xl mx-auto">
       <h1 class="text-2xl font-bold mb-2">{{ t('agentService.title') }}</h1>
@@ -154,6 +155,7 @@
       </div>
     </div>
   </div>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
@@ -161,6 +163,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAPI } from '@/api/agent'
 import type { AgentState } from '@/api/agent'
+import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
 

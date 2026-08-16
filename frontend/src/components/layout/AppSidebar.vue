@@ -35,17 +35,6 @@
       <template v-if="isAdmin">
         <!-- Admin Section -->
         <div class="sidebar-section">
-          <!-- Agent Service Button -->
-          <router-link
-            to="/agent"
-            class="sidebar-link mb-1"
-            :class="{ 'sidebar-link-active': isActive('/agent'), 'sidebar-link-collapsed': sidebarCollapsed }"
-            :title="sidebarCollapsed ? t('nav.agentService') : undefined"
-            @click="handleMenuItemClick('/agent')"
-          >
-            <component :is="RobotIcon" class="h-5 w-5 flex-shrink-0" />
-            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.agentService') }}</span>
-          </router-link>
           <template v-for="item in adminNavItems" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
@@ -848,7 +837,7 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/agents', label: t('nav.agentService'), icon: RobotIcon },
+    { path: '/admin/agents', label: t('nav.agentAdmin'), icon: RobotIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 
