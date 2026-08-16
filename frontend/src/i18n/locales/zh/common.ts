@@ -209,10 +209,11 @@ export default {
     agentAdmin: 'Agent 管理',
   },
 
-  // Agent 服务（PicoClaw 容器一键部署）
+  // Agent 服务（云端 PicoClaw Agent 一键部署）
   agentService: {
     title: 'Agent 服务',
-    description: '一键部署您的独立 PicoClaw 容器（专用环境与 API 密钥，关闭即销毁）。',
+    description:
+      '一键部署您的专属云端 PicoClaw Agent。启动后将自动生成专属 Agent API 密钥（倍率最优分组、关闭即自动删除）；实例数据完全隔离；空闲超时自动销毁，销毁前请及时下载归档，销毁后数据概不负责。',
     statusTitle: '服务状态',
     statusNotStarted: '未启动',
     statusStarting: '启动中',
@@ -230,25 +231,17 @@ export default {
     queuedHint: '排队等待资源，位置',
     queuedProvisioning: '正在创建中...',
     agentUiTitle: 'PicoClaw Web UI',
-    openInNewWindow: '在新窗口打开',
+    launchNote: '点击启动将自动生成新的 Agent 密钥并注入实例',
+    passwordLabel: '访问密码',
+    copyButton: '复制',
+    copied: '已复制',
     emptyTitle: '未启动 Agent 服务',
     emptyHint: '点击「启动 Agent」按钮来创建并运行您的独立 PicoClaw 容器。',
-    emptyNote: '每个用户将获得独立的容器环境，关闭后数据保留 7 天。',
+    emptyNote:
+      '每个用户将获得完全隔离的容器环境。空闲 {X} 分钟自动销毁、关闭后数据保留 {Y} 小时，销毁前请及时下载归档。',
     startError: '启动失败，请稍后重试',
     stopError: '关闭失败，请稍后重试',
     downloadError: '下载归档失败',
-    agentInfoTitle: 'Agent 实例信息',
-    openGateway: '打开网关',
-    apiEndpoint: 'API 端点',
-    accessHost: '访问地址',
-    accessPassword: '访问密码',
-    healthCheck: '健康检查',
-    quickStartTitle: '快速接入指引',
-    quickStartStep1: '在 Claude Code 或其他 OpenAI 兼容客户端中设置 API 端点为上方地址',
-    quickStartStep2: '使用您的云间 API Key 进行认证',
-    quickStartStep3: '选择 deepseek-v4-flash 模型开始对话',
-    healthOk: '网关在线',
-    healthChecking: '检测中...',
   },
 
   // Auth

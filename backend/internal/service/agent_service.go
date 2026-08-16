@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,17 +38,24 @@ import (
 // （AGENT_MODEL_BASE_URL），用户专属 key 绑定的分组需包含该模型。
 const defaultAgentModel = "deepseek-v4-flash"
 
+// managerCreateTimeout 是 manager Create 的独立超时：容器创建（docker run +
+// launcher 初始化）是同步慢操作，需大于前端 axios 30s 超时，让服务端在客户端
+// 断开后仍能完成创建并把状态落库（#320 Network error 根因修复）。
+const managerCreateTimeout = 150 * time.Second
+
 // AgentV2State 是 manager /v2/agents 响应中单个实例的状态结构。
 type AgentV2State struct {
-	UserID          int64  `json:"user_id"`
-	Status          string `json:"status"` // none/queued/provisioning/active/retained/over_quota
-	Port            int    `json:"port,omitempty"`
-	AccessHost      string `json:"access_host,omitempty"`
-	AccessPassword  string `json:"access_password,omitempty"`
-	IdleDeadline    int64  `json:"idle_deadline,omitempty"`    // unix 秒
-	RetainDeadline  int64  `json:"retain_deadline,omitempty"`  // unix 秒
-	HardcapDeadline int64  `json:"hardcap_deadline,omitempty"` // unix 秒
-	Position        int    `json:"position,omitempty"`         // queued 时的排队位置
+	UserID             int64  `json:"user_id"`
+	Status             string `json:"status"` // none/queued/provisioning/active/retained/over_quota
+	Port               int    `json:"port,omitempty"`
+	AccessHost         string `json:"access_host,omitempty"`
+	AccessPassword     string `json:"access_password,omitempty"`
+	IdleDeadline       int64  `json:"idle_deadline,omitempty"`       // unix 秒
+	RetainDeadline     int64  `json:"retain_deadline,omitempty"`     // unix 秒
+	HardcapDeadline    int64  `json:"hardcap_deadline,omitempty"`    // unix 秒
+	Position           int    `json:"position,omitempty"`            // queued 时的排队位置
+	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
+	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
 }
 
 // AgentPoolStats 是 manager 池统计。
@@ -64,11 +72,12 @@ type AgentListResponse struct {
 	Pool   AgentPoolStats `json:"pool"`
 }
 
-// AgentConfig 是可配置项（数据保留时长/工作空间配额/内存配额）。
+// AgentConfig 是可配置项（数据保留时长/工作空间配额/内存配额/idle 超时）。
 type AgentConfig struct {
 	DataRetentionHours int `json:"data_retention_hours"`
 	WorkspaceQuotaMB   int `json:"workspace_quota_mb"`
 	MemoryMB           int `json:"memory_mb"`
+	IdleTimeoutMinutes int `json:"idle_timeout_minutes"`
 }
 
 // AgentUserConfigResponse 是每用户配置响应（全局 + 覆盖 + 生效值）。
@@ -80,8 +89,10 @@ type AgentUserConfigResponse struct {
 
 // AgentManagerInterface 抽象 NY agent-manager daemon 的 /v2 API（可 mock）。
 type AgentManagerInterface interface {
-	// Create 请求创建实例。返回状态码语义：201=已激活 202=已排队 200=已存在（幂等）。
-	Create(ctx context.Context, userID int64, apiKey string) (*AgentV2State, int, error)
+	// Create 请求创建实例。models 为该用户选定分组支持的模型名列表（可为空，
+	// manager 注入容器 config.json 供实例只允许调用这些模型）。
+	// 返回状态码语义：201=已激活 202=已排队 200=已存在（幂等）。
+	Create(ctx context.Context, userID int64, apiKey string, models []string) (*AgentV2State, int, error)
 	// Get 查询单实例；无实例时返回 (nil, nil, nil)。
 	Get(ctx context.Context, userID int64) (*AgentV2State, error)
 	// Delete 销毁并归档实例（幂等：无实例也返回成功）。
@@ -102,7 +113,8 @@ type AgentManagerInterface interface {
 
 // AgentKeyProvisioner 抽象用户专属 API key 的创建/吊销（可 mock）。
 type AgentKeyProvisioner interface {
-	Create(ctx context.Context, userID int64) (key string, keyID int64, err error)
+	// Create 创建用户专属 key 并返回其绑定分组支持的模型名列表（供 manager 注入实例）。
+	Create(ctx context.Context, userID int64) (key string, keyID int64, models []string, err error)
 	Revoke(ctx context.Context, keyID int64) error
 }
 
@@ -220,11 +232,15 @@ func (c *httpAgentManagerClient) do(ctx context.Context, method, path string, pa
 	return resp, nil
 }
 
-func (c *httpAgentManagerClient) Create(ctx context.Context, userID int64, apiKey string) (*AgentV2State, int, error) {
-	resp, err := c.do(ctx, http.MethodPost, "/v2/agents", map[string]any{
+func (c *httpAgentManagerClient) Create(ctx context.Context, userID int64, apiKey string, models []string) (*AgentV2State, int, error) {
+	payload := map[string]any{
 		"user_id": userID,
 		"api_key": apiKey,
-	})
+	}
+	if len(models) > 0 {
+		payload["models"] = models
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/v2/agents", payload)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -410,29 +426,84 @@ func (c *httpAgentManagerClient) Archive(ctx context.Context, userID int64) (io.
 }
 
 // apiKeyAgentProvisioner 基于 APIKeyService 的真实 key 创建/吊销。
-// 创建时把 key 绑定到用户第一个可用分组（保证可调度，#32 教训：未分组账号不可调度）。
+// 创建时把 key 绑定到用户「视角倍率最低」的可用分组（保证可调度，#32 教训：未分组账号不可调度；
+// 优先 openai 平台，无 openai 分组则选全量倍率最低者），并把该分组支持的模型名列表
+// 随 Create 请求透传给 manager（注入实例 config.json，限制实例可调用模型）。
 type apiKeyAgentProvisioner struct {
-	keyService *APIKeyService
+	keyService     *APIKeyService
+	channelService *ChannelService
 }
 
-func NewAPIKeyAgentProvisioner(keyService *APIKeyService) AgentKeyProvisioner {
-	return &apiKeyAgentProvisioner{keyService: keyService}
+func NewAPIKeyAgentProvisioner(keyService *APIKeyService, channelService *ChannelService) AgentKeyProvisioner {
+	return &apiKeyAgentProvisioner{keyService: keyService, channelService: channelService}
 }
 
-func (p *apiKeyAgentProvisioner) Create(ctx context.Context, userID int64) (string, int64, error) {
+func (p *apiKeyAgentProvisioner) Create(ctx context.Context, userID int64) (string, int64, []string, error) {
 	groups, err := p.keyService.GetAvailableGroups(ctx, userID)
 	if err != nil {
-		return "", 0, fmt.Errorf("agent key: get available groups: %w", err)
+		return "", 0, nil, fmt.Errorf("agent key: get available groups: %w", err)
 	}
-	req := CreateAPIKeyRequest{Name: "Agent 服务"}
-	if len(groups) > 0 {
-		req.GroupID = &groups[0].ID
+	group, ok := pickAgentGroup(groups)
+	var models []string
+	req := CreateAPIKeyRequest{Name: "Agent"}
+	if ok {
+		req.GroupID = &group.ID
+		models = p.groupModels(ctx, &group)
 	}
 	key, err := p.keyService.Create(ctx, userID, req)
 	if err != nil {
-		return "", 0, fmt.Errorf("agent key: create: %w", err)
+		return "", 0, nil, fmt.Errorf("agent key: create: %w", err)
 	}
-	return key.Key, key.ID, nil
+	return key.Key, key.ID, models, nil
+}
+
+// pickAgentGroup 从用户可用分组中选择绑定目标：优先 platform==openai 的分组，
+// 组内按 rate_multiplier 升序取第一个（= 用户视角倍率最低）；无 openai 分组时
+// 在全部分组中任选倍率最低者。返回 (group, true)；空列表返回 (Group{}, false)。
+func pickAgentGroup(groups []Group) (Group, bool) {
+	if len(groups) == 0 {
+		return Group{}, false
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Platform == PlatformOpenAI && groups[j].Platform != PlatformOpenAI {
+			return true
+		}
+		if groups[i].Platform != PlatformOpenAI && groups[j].Platform == PlatformOpenAI {
+			return false
+		}
+		if groups[i].RateMultiplier != groups[j].RateMultiplier {
+			return groups[i].RateMultiplier < groups[j].RateMultiplier
+		}
+		return groups[i].ID < groups[j].ID
+	})
+	return groups[0], true
+}
+
+// groupModels 返回选定分组支持的模型名列表：
+//   - 分组显式配置了 models_list_config（CustomModelsListEnabled）时直接用其列表；
+//   - 否则走渠道聚合（ChannelService.ListPlazaGroups 的渠道 model_mapping/SupportedModels 口径）。
+func (p *apiKeyAgentProvisioner) groupModels(ctx context.Context, group *Group) []string {
+	if group.CustomModelsListEnabled() {
+		return append([]string(nil), group.ModelsListConfig.Models...)
+	}
+	if p.channelService == nil {
+		return nil
+	}
+	plaza, err := p.channelService.ListPlazaGroups(ctx)
+	if err != nil {
+		return nil // 模型列表是增强信息，拿不到不阻塞 key 创建
+	}
+	for i := range plaza {
+		if plaza[i].ID != group.ID {
+			continue
+		}
+		names := make([]string, 0, len(plaza[i].Models))
+		for _, m := range plaza[i].Models {
+			names = append(names, m.Name)
+		}
+		return names
+	}
+	return nil
 }
 
 func (p *apiKeyAgentProvisioner) Revoke(ctx context.Context, keyID int64) error {
@@ -481,16 +552,18 @@ func NewAgentService(
 
 // AgentState 是返回给前端的实例状态。
 type AgentState struct {
-	Status          string `json:"status"` // not_started / running / queued / provisioning / retained / over_quota / error
-	Port            int    `json:"port,omitempty"`
-	AccessHost      string `json:"access_host,omitempty"`
-	AccessPassword  string `json:"access_password,omitempty"`
-	AgentURL        string `json:"agent_url,omitempty"`
-	IdleDeadline    int64  `json:"idle_deadline,omitempty"`
-	RetainDeadline  int64  `json:"retain_deadline,omitempty"`
-	HardcapDeadline int64  `json:"hardcap_deadline,omitempty"`
-	Position        int    `json:"position,omitempty"`
-	CreatedAt       string `json:"created_at,omitempty"`
+	Status             string `json:"status"` // not_started / running / queued / provisioning / retained / over_quota / error
+	Port               int    `json:"port,omitempty"`
+	AccessHost         string `json:"access_host,omitempty"`
+	AccessPassword     string `json:"access_password,omitempty"`
+	AgentURL           string `json:"agent_url,omitempty"`
+	IdleDeadline       int64  `json:"idle_deadline,omitempty"`
+	RetainDeadline     int64  `json:"retain_deadline,omitempty"`
+	HardcapDeadline    int64  `json:"hardcap_deadline,omitempty"`
+	Position           int    `json:"position,omitempty"`
+	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
+	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
+	CreatedAt          string `json:"created_at,omitempty"`
 }
 
 func (s *AgentService) IsConfigured() bool {
@@ -504,26 +577,49 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 		return nil, errors.New("agent service not configured (AGENT_MANAGER_URL / AGENT_MANAGER_TOKEN)")
 	}
 
-	// 已有记录且非 error/orphaned：幂等返回现状态（不重复创建 key）
+	// 已有记录且非 error/orphaned：幂等返回现状态（不重复创建 key）。
+	// 用 manager 实时状态补全 access_host/password/deadlines（DB 行不含密码，
+	// 幂等路径也必须给前端完整的 access_password 等字段，#320 验收）。
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil && existing.Status != "error" && existing.Status != "orphaned" {
-		return s.mapRowToState(existing), nil
+		state := s.mapRowToState(existing)
+		if st, err := s.manager.Get(ctx, userID); err == nil && st != nil {
+			state.AccessHost = st.AccessHost
+			state.AccessPassword = st.AccessPassword
+			state.IdleDeadline = st.IdleDeadline
+			state.RetainDeadline = st.RetainDeadline
+			state.HardcapDeadline = st.HardcapDeadline
+			state.Position = st.Position
+			state.Port = st.Port
+			state.IdleTimeoutMinutes = st.IdleTimeoutMinutes
+			state.DataRetentionHours = st.DataRetentionHours
+			state.AgentURL = s.agentURL(st)
+		}
+		return state, nil
 	}
 
-	// 生成用户专属 key（绑定第一个可用分组）
-	key, keyID, err := s.provision.Create(ctx, userID)
+	// 生成用户专属 key（绑定倍率最低的可用分组 + 模型列表）
+	key, keyID, models, err := s.provision.Create(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 代理到 manager
-	st, code, err := s.manager.Create(ctx, userID, key)
+	// 代理到 manager。⚠️ 关键：不能沿用客户端请求 ctx —— 容器创建（docker run +
+	// launcher 初始化）可能长达 60s+，而前端 axios 超时仅 30s；客户端断开会导致
+	// gin 取消 ctx，manager 调用被中断（"context canceled"），key 被误吊销而
+	// manager 侧容器仍在创建 → 孤儿实例。改用 WithoutCancel + 独立超时，
+	// 客户端断开不影响容器创建与落库，状态最终由 /agent/status 对账。
+	// （实测：断开后 manager 调用成功但 Upsert 用客户端 ctx 会报
+	//  "persist: context canceled" → 行缺失、key 无法在 stop 时吊销，必须一并使用 mgrCtx）
+	mgrCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), managerCreateTimeout)
+	defer cancel()
+	st, code, err := s.manager.Create(mgrCtx, userID, key, models)
 	if err != nil {
-		// 容器创建失败：吊销刚创建的 key，不留孤儿
-		_ = s.provision.Revoke(ctx, keyID)
+		// 容器创建真实失败：吊销刚创建的 key，不留孤儿
+		_ = s.provision.Revoke(mgrCtx, keyID)
 		return nil, fmt.Errorf("start agent: %w", err)
 	}
 
@@ -542,11 +638,12 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 		Status:        status,
 		AgentKey:      key,
 		AgentKeyID:    keyID,
+		CreatedAt:     time.Now(),
 	}
 	if st != nil {
 		agent.Port = st.Port
 	}
-	if err := s.store.Upsert(ctx, agent); err != nil {
+	if err := s.store.Upsert(mgrCtx, agent); err != nil {
 		return nil, fmt.Errorf("start agent: persist: %w", err)
 	}
 
@@ -559,6 +656,8 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 		state.HardcapDeadline = st.HardcapDeadline
 		state.Position = st.Position
 		state.Port = st.Port
+		state.IdleTimeoutMinutes = st.IdleTimeoutMinutes
+		state.DataRetentionHours = st.DataRetentionHours
 		state.AgentURL = s.agentURL(st)
 	}
 	return state, nil
@@ -566,29 +665,36 @@ func (s *AgentService) StartAgent(ctx context.Context, userID int64) (*AgentStat
 
 // StopAgent 停止并销毁用户 Agent 实例（薄代理到 manager Delete，幂等）。
 // manager 报错 -> 保留行状态 error 并返回错误（v1 orphaned 语义由 manager 接管）。
+//
+// ⚠️ 无论本地 agents 行是否存在都调用 manager.Delete（manager 端幂等）：
+// StartAgent 若因客户端断开/超时中断可能没有本地行但 manager 实例已创建，
+// 只按本地行短路会让孤儿实例永远销毁不掉（#320 实测：stop 变 no-op）。
 func (s *AgentService) StopAgent(ctx context.Context, userID int64) error {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
-		return nil // 幂等：无实例 = 成功
-	}
 
 	if err := s.manager.Delete(ctx, userID); err != nil {
-		existing.Status = "error"
-		_ = s.store.Upsert(ctx, existing)
+		if existing != nil {
+			existing.Status = "error"
+			_ = s.store.Upsert(ctx, existing)
+		}
 		return fmt.Errorf("stop agent: destroy failed (row preserved as error): %w", err)
 	}
 
-	// 销毁成功：吊销 key + 清库
-	if err := s.provision.Revoke(ctx, existing.AgentKeyID); err != nil {
-		existing.Status = "error"
-		_ = s.store.Upsert(ctx, existing)
-		return fmt.Errorf("stop agent: revoke key failed (container destroyed): %w", err)
+	// 销毁成功：吊销 key + 清库（无本地行则无需吊销）
+	if existing != nil {
+		if err := s.provision.Revoke(ctx, existing.AgentKeyID); err != nil {
+			existing.Status = "error"
+			_ = s.store.Upsert(ctx, existing)
+			return fmt.Errorf("stop agent: revoke key failed (container destroyed): %w", err)
+		}
 	}
-	if err := s.store.DeleteByUser(ctx, userID); err != nil {
-		return fmt.Errorf("stop agent: clear: %w", err)
+	if existing != nil {
+		if err := s.store.DeleteByUser(ctx, userID); err != nil {
+			return fmt.Errorf("stop agent: clear: %w", err)
+		}
 	}
 	return nil
 }
@@ -617,14 +723,16 @@ func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*Agent
 	}
 
 	state := &AgentState{
-		Status:          st.Status,
-		Port:            st.Port,
-		AccessHost:      st.AccessHost,
-		AccessPassword:  st.AccessPassword,
-		IdleDeadline:    st.IdleDeadline,
-		RetainDeadline:  st.RetainDeadline,
-		HardcapDeadline: st.HardcapDeadline,
-		Position:        st.Position,
+		Status:             st.Status,
+		Port:               st.Port,
+		AccessHost:         st.AccessHost,
+		AccessPassword:     st.AccessPassword,
+		IdleDeadline:       st.IdleDeadline,
+		RetainDeadline:     st.RetainDeadline,
+		HardcapDeadline:    st.HardcapDeadline,
+		Position:           st.Position,
+		IdleTimeoutMinutes: st.IdleTimeoutMinutes,
+		DataRetentionHours: st.DataRetentionHours,
 	}
 	state.AgentURL = s.agentURL(st)
 	return state, nil

@@ -209,10 +209,11 @@ export default {
     agentAdmin: 'Agent Management',
   },
 
-  // Agent Service (one-click PicoClaw container)
+  // Agent Service (one-click cloud PicoClaw Agent)
   agentService: {
     title: 'Agent Service',
-    description: 'Deploy your own isolated PicoClaw container with a dedicated API key in one click. Destroyed when closed.',
+    description:
+      'Deploy your dedicated cloud PicoClaw Agent in one click. A dedicated Agent API key is automatically generated (best-rate group, automatically deleted when stopped); instance data is fully isolated; idle instances are automatically destroyed — download your archive before destruction, data is not recoverable afterwards.',
     statusTitle: 'Service Status',
     statusNotStarted: 'Not Started',
     statusStarting: 'Starting',
@@ -230,25 +231,17 @@ export default {
     queuedHint: 'Waiting for capacity, position',
     queuedProvisioning: 'Provisioning...',
     agentUiTitle: 'PicoClaw Web UI',
-    openInNewWindow: 'Open in new window',
+    launchNote: 'Clicking start automatically generates a new Agent key and injects it into the instance',
+    passwordLabel: 'Access Password',
+    copyButton: 'Copy',
+    copied: 'Copied',
     emptyTitle: 'Agent service not started',
     emptyHint: 'Click "Start Agent" to create and run your own PicoClaw container.',
-    emptyNote: 'Each user gets an isolated container. Data is retained for 7 days after shutdown.',
+    emptyNote:
+      'Each user gets a fully isolated container environment. It is destroyed automatically after {X} minutes of idle time; data is retained for {Y} hours after shutdown. Please download your archive before destruction.',
     startError: 'Failed to start, please retry later',
     stopError: 'Failed to stop, please retry later',
     downloadError: 'Failed to download archive',
-    agentInfoTitle: 'Agent Instance Info',
-    openGateway: 'Open Gateway',
-    apiEndpoint: 'API Endpoint',
-    accessHost: 'Access Host',
-    accessPassword: 'Access Password',
-    healthCheck: 'Health Check',
-    quickStartTitle: 'Quick Start Guide',
-    quickStartStep1: 'Set the API endpoint in Claude Code or any OpenAI-compatible client to the address above',
-    quickStartStep2: 'Authenticate with your CloudZone API key',
-    quickStartStep3: 'Select the deepseek-v4-flash model and start chatting',
-    healthOk: 'Gateway Online',
-    healthChecking: 'Checking...',
   },
 
   // Auth

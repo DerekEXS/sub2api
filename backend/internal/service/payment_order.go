@@ -671,10 +671,12 @@ func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, cur
 	return calculateCreateOrderPayAmount(paymentAmount, feeRate, currency)
 }
 
-// fxAPICandidates 返回 FX API URL 候选列表（v4.6.2）：多 URL 回退链优先，单 URL 兼容。
+// fxAPICandidates 返回 FX API URL 候选列表（v4.6.2 + task #321）：
+// 多 URL 回退链优先，单 URL 兼容；均未配置时用内置多源默认链（defaultFXAPIURLs，
+// 2026-08-16 实测可用：open.er-api / frankfurter.dev / fxratesapi），避免静默落到固定汇率。
 func fxAPICandidates(cfg *PaymentConfig) []string {
 	if cfg == nil {
-		return nil
+		return defaultFXAPIURLs
 	}
 	if len(cfg.FXApiURLs) > 0 {
 		return cfg.FXApiURLs
@@ -682,7 +684,7 @@ func fxAPICandidates(cfg *PaymentConfig) []string {
 	if strings.TrimSpace(cfg.FXApiURL) != "" {
 		return []string{cfg.FXApiURL}
 	}
-	return nil
+	return defaultFXAPIURLs
 }
 
 // calculateBalanceGatewayBaseAmount 计算余额充值订单的网关扣款基数（v4.6.2）。

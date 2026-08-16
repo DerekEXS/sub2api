@@ -35,7 +35,24 @@ const (
 	fxCacheDefaultTTL  = time.Hour
 	fxFailureThreshold = 3 // 连续失败 N 次后立即降级到 fallback（不等 TTL 过期）
 	fxHTTPTimeout      = 5 * time.Second
+	// fxStaleCutoff 数据新鲜度阈值：来源自带时间戳且数据早于该阈值的视为"过期"。
+	// 过期来源仅在全部来源都失败/过期时作为最后手段使用（不写入缓存，下次调用重新评估）。
+	// 7 天覆盖：ECB（frankfurter）按工作日更新，长周末后数据最多 ~4 天旧；open.er-api 每日更新。
+	fxStaleCutoff = 7 * 24 * time.Hour
 )
+
+// defaultFXAPIURLs 默认多源汇率 API 回退链（task #321 修复，2026-08-16 实测）：
+//   - open.er-api.com/v6/latest/USD：可用，每日更新，免费无 key（exchangerate-api 免费版现行端点）
+//   - api.frankfurter.dev/v1/latest?base=USD：可用，ECB 官方数据（api.frankfurter.app 已 301 到 .dev，直接用 .dev 省一跳）
+//   - api.fxratesapi.com/latest?base=USD：可用，独立源
+//
+// 不再列入：api.exchangerate-api.com/v4（已弃用，响应体带 WARNING_UPGRADE_TO_V6，与 open.er-api 同源
+// 无冗余意义）、api.exchangerate.host（实测已死：需付费 access_key，返回 missing_access_key）。
+var defaultFXAPIURLs = []string{
+	"https://open.er-api.com/v6/latest/USD",
+	"https://api.frankfurter.dev/v1/latest?base=USD",
+	"https://api.fxratesapi.com/latest?base=USD",
+}
 
 type fxCacheEntry struct {
 	FromCurrency string    `json:"from_currency"`
@@ -146,8 +163,15 @@ func (s *FXService) GetRate(ctx context.Context, from, to string, apiURLs []stri
 			urls = append(urls, v)
 		}
 	}
+	if len(urls) == 0 {
+		// 未配置任何 URL 时用内置多源默认链，避免静默落到固定汇率
+		urls = defaultFXAPIURLs
+	}
+	// 过期数据候选：全部来源都过期时作为最后手段（不写缓存，优先新鲜数据）
+	var staleRate float64
+	staleFound := false
 	for _, url := range urls {
-		rates, base, ok := s.fetchAPI(ctx, url)
+		rates, base, fetchedAt, ok := s.fetchAPI(ctx, url)
 		if !ok {
 			s.mu.Lock()
 			s.consecutiveFail++
@@ -167,18 +191,38 @@ func (s *FXService) GetRate(ctx context.Context, from, to string, apiURLs []stri
 			continue
 		}
 		rate := rTo / rFrom
-		if rate <= 0 {
+		if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			if s.log != nil {
+				s.log.Warn("fx api abnormal rate", zap.String("url", url), zap.Float64("rate", rate))
+			}
 			continue
 		}
-		s.mu.Lock()
-		s.cache.Entries[key] = fxCacheEntry{
-			FromCurrency: from, ToCurrency: to, Rate: rate,
-			BaseCurrency: base, FetchedAt: now, SuccessCount: entry.SuccessCount + 1,
+		// 新鲜度判定：无时间戳的来源按新鲜处理；有过期时间戳的来源只作最后手段
+		if fetchedAt.IsZero() || now.Sub(fetchedAt) <= fxStaleCutoff {
+			s.mu.Lock()
+			s.cache.Entries[key] = fxCacheEntry{
+				FromCurrency: from, ToCurrency: to, Rate: rate,
+				BaseCurrency: base, FetchedAt: now, SuccessCount: entry.SuccessCount + 1,
+			}
+			s.consecutiveFail = 0
+			s.mu.Unlock()
+			s.saveCache()
+			return rate
 		}
-		s.consecutiveFail = 0
-		s.mu.Unlock()
-		s.saveCache()
-		return rate
+		if s.log != nil {
+			s.log.Warn("fx api data stale, skipping", zap.String("url", url), zap.Time("fetched_at", fetchedAt))
+		}
+		if !staleFound {
+			staleFound = true
+			staleRate = rate
+		}
+	}
+	// 全部来源都过期：用最后手段的过期值（比固定汇率更贴近市场），不写缓存
+	if staleFound {
+		if s.log != nil {
+			s.log.Warn("fx api all sources stale, using stale rate as last resort", zap.Float64("rate", staleRate))
+		}
+		return staleRate
 	}
 
 	// 兜底：用 settings.FXFallbackRate（CNY per USD）做 USD 中转
@@ -191,7 +235,7 @@ func (s *FXService) TestFetchAPI(url string) (float64, string, bool) {
 	if s == nil {
 		return 0, "", false
 	}
-	rates, base, ok := s.fetchAPI(context.Background(), url)
+	rates, base, _, ok := s.fetchAPI(context.Background(), url)
 	if !ok {
 		return 0, base, false
 	}
@@ -203,45 +247,89 @@ func (s *FXService) TestFetchAPI(url string) (float64, string, bool) {
 	return cny / usd, base, true
 }
 
-// fetchAPI 拉取汇率 API，返回完整 rates map + base。
+// fxAPIResponse 兼容常见免费汇率 API 的响应结构（task #321 加固）：
+//   - exchangerate-api v4 / frankfurter：{"base": "...", "rates": {...}, "date": "..."}
+//   - open.er-api v6：{"result": "success", "base_code": "...", "rates": {...},
+//     "time_last_update_utc": "Sun, 16 Aug 2026 ...", "time_last_update_unix": 1786838551}
+//   - fxratesapi：{"base": "...", "rates": {...}, "date": "2026-08-16T10:22:00.000Z"}
+type fxAPIResponse struct {
+	Result             string             `json:"result"`
+	Base               string             `json:"base"`
+	BaseCode           string             `json:"base_code"`
+	Rates              map[string]float64 `json:"rates"`
+	Date               string             `json:"date"`
+	TimeLastUpdateUTC  string             `json:"time_last_update_utc"`
+	TimeLastUpdateUnix int64              `json:"time_last_update_unix"`
+}
+
+// parseFxTimestamp 解析常见汇率 API 的时间戳字段（按优先级）：
+// time_last_update_unix（秒）→ time_last_update_utc（RFC1123/RFC3339）→ date（YYYY-MM-DD/RFC3339）。
+// 全部解析失败返回零值，调用方视为"无时间戳"（按新鲜数据处理）。
+func parseFxTimestamp(p *fxAPIResponse) time.Time {
+	if p.TimeLastUpdateUnix > 0 {
+		return time.Unix(p.TimeLastUpdateUnix, 0).UTC()
+	}
+	if s := strings.TrimSpace(p.TimeLastUpdateUTC); s != "" {
+		for _, layout := range []string{time.RFC1123, time.RFC1123Z, time.RFC3339} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return t.UTC()
+			}
+		}
+	}
+	if s := strings.TrimSpace(p.Date); s != "" {
+		for _, layout := range []string{"2006-01-02", time.RFC3339} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return t.UTC()
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// fetchAPI 拉取汇率 API，返回完整 rates map + base + 数据时间戳（零值=无时间戳）。
 // 实际：从 GET {apiURL} 拿 JSON，解析 "rates" map（key=币种, value=1 base = X target）。
-// base 缺失时按 "USD" 处理。调用方用 rates[to]/rates[from] 数学换算（与 base 无关）。
-func (s *FXService) fetchAPI(ctx context.Context, apiURL string) (map[string]float64, string, bool) {
+// base 缺失时按 "USD" 处理（open.er-api 的 base_code 字段兼容）；result 字段非 success
+// （如 error-type）直接跳过；调用方用 rates[to]/rates[from] 数学换算（与 base 无关）。
+func (s *FXService) fetchAPI(ctx context.Context, apiURL string) (map[string]float64, string, time.Time, bool) {
 	if !strings.HasPrefix(apiURL, "http://") && !strings.HasPrefix(apiURL, "https://") {
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
 	req.Header.Set("User-Agent", "Sub2API/4.6.2 (+fx)")
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
-	var payload struct {
-		Base  string             `json:"base"`
-		Rates map[string]float64 `json:"rates"`
-	}
+	var payload fxAPIResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, "", false
+		return nil, "", time.Time{}, false
 	}
-	if payload.Base == "" {
-		payload.Base = "USD"
+	if payload.Result != "" && payload.Result != "success" {
+		return nil, "", time.Time{}, false
+	}
+	base := strings.TrimSpace(payload.Base)
+	if base == "" {
+		base = strings.TrimSpace(payload.BaseCode)
+	}
+	if base == "" {
+		base = "USD"
 	}
 	if len(payload.Rates) == 0 {
-		return nil, payload.Base, false
+		return nil, base, time.Time{}, false
 	}
-	return payload.Rates, payload.Base, true
+	return payload.Rates, base, parseFxTimestamp(&payload), true
 }
 
 // fallbackCrossViaUSD 用 fallback（CNY per USD）做 from→to 的中转换算。

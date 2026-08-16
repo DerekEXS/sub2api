@@ -76,6 +76,7 @@ export interface AgentConfig {
   data_retention_hours: number
   workspace_quota_mb: number
   memory_mb: number
+  idle_timeout_minutes: number
 }
 
 export interface AgentUserConfigResponse {

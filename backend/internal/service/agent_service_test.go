@@ -21,6 +21,7 @@ import (
 type mockAgentManagerV2 struct {
 	mu          sync.Mutex
 	createCalls []int64
+	lastModels  []string
 	deleteCalls []int64
 	getCalls    []int64
 	states      map[int64]*AgentV2State
@@ -39,7 +40,7 @@ func (m *mockAgentManagerV2) GetConfig(ctx context.Context) (*AgentConfig, error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.config.DataRetentionHours == 0 {
-		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96}, nil
+		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}, nil
 	}
 	cp := m.config
 	return &cp, nil
@@ -57,13 +58,16 @@ func (m *mockAgentManagerV2) UpdateConfig(ctx context.Context, cfg AgentConfig) 
 	if cfg.MemoryMB > 0 {
 		m.config.MemoryMB = cfg.MemoryMB
 	}
+	if cfg.IdleTimeoutMinutes > 0 {
+		m.config.IdleTimeoutMinutes = cfg.IdleTimeoutMinutes
+	}
 	cp := m.config
 	return &cp, nil
 }
 
 func (m *mockAgentManagerV2) globalLocked() *AgentConfig {
 	if m.config.DataRetentionHours == 0 {
-		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96}
+		return &AgentConfig{DataRetentionHours: 72, WorkspaceQuotaMB: 250, MemoryMB: 96, IdleTimeoutMinutes: 30}
 	}
 	cp := m.config
 	return &cp
@@ -84,6 +88,9 @@ func (m *mockAgentManagerV2) GetUserConfig(ctx context.Context, userID int64) (*
 		}
 		if v, ok := ov["memory_mb"]; ok && v > 0 {
 			eff.MemoryMB = v
+		}
+		if v, ok := ov["idle_timeout_minutes"]; ok && v > 0 {
+			eff.IdleTimeoutMinutes = v
 		}
 	}
 	return &AgentUserConfigResponse{Global: *g, Overrides: ov, Effective: eff}, nil
@@ -116,6 +123,8 @@ func (m *mockAgentManagerV2) UpdateUserConfig(ctx context.Context, userID int64,
 			eff.WorkspaceQuotaMB = v
 		case "memory_mb":
 			eff.MemoryMB = v
+		case "idle_timeout_minutes":
+			eff.IdleTimeoutMinutes = v
 		}
 	}
 	m.mu.Unlock()
@@ -130,10 +139,11 @@ func newMockAgentManagerV2() *mockAgentManagerV2 {
 	}
 }
 
-func (m *mockAgentManagerV2) Create(ctx context.Context, userID int64, apiKey string) (*AgentV2State, int, error) {
+func (m *mockAgentManagerV2) Create(ctx context.Context, userID int64, apiKey string, models []string) (*AgentV2State, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createCalls = append(m.createCalls, userID)
+	m.lastModels = append([]string(nil), models...)
 	if m.createErr != nil {
 		return nil, 0, m.createErr
 	}
@@ -141,14 +151,16 @@ func (m *mockAgentManagerV2) Create(ctx context.Context, userID int64, apiKey st
 		return &AgentV2State{UserID: userID, Status: "queued", Position: 1}, 202, nil
 	}
 	st := &AgentV2State{
-		UserID:          userID,
-		Status:          "active",
-		Port:            18801 + len(m.createCalls),
-		AccessHost:      "agent-" + itoa(userID) + ".agent.cloudzone-api.cyou",
-		AccessPassword:  "pwd-test",
-		IdleDeadline:    time.Now().Add(time.Hour).Unix(),
-		RetainDeadline:  time.Now().Add(24 * time.Hour).Unix(),
-		HardcapDeadline: time.Now().Add(72 * time.Hour).Unix(),
+		UserID:             userID,
+		Status:             "active",
+		Port:               18801 + len(m.createCalls),
+		AccessHost:         "agent-" + itoa(userID) + ".agent.cloudzone-api.cyou",
+		AccessPassword:     "pwd-test",
+		IdleDeadline:       time.Now().Add(time.Hour).Unix(),
+		RetainDeadline:     time.Now().Add(24 * time.Hour).Unix(),
+		HardcapDeadline:    time.Now().Add(72 * time.Hour).Unix(),
+		IdleTimeoutMinutes: 30,
+		DataRetentionHours: 72,
 	}
 	m.states[userID] = st
 	return st, m.createCode, nil
@@ -220,14 +232,14 @@ type mockAgentProvisionerV2 struct {
 	createErr error
 }
 
-func (p *mockAgentProvisionerV2) Create(ctx context.Context, userID int64) (string, int64, error) {
+func (p *mockAgentProvisionerV2) Create(ctx context.Context, userID int64) (string, int64, []string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.createErr != nil {
-		return "", 0, p.createErr
+		return "", 0, nil, p.createErr
 	}
 	p.created++
-	return "sk-agent-test-v2-" + itoa(int64(p.created)), int64(2000 + p.created), nil
+	return "sk-agent-test-v2-" + itoa(int64(p.created)), int64(2000 + p.created), []string{"deepseek-v4-flash"}, nil
 }
 
 func (p *mockAgentProvisionerV2) Revoke(ctx context.Context, keyID int64) error {
@@ -416,15 +428,19 @@ func TestAgentServiceV2Stop(t *testing.T) {
 		t.Fatalf("row still present after stop: %+v", row)
 	}
 
-	// 幂等：再次 stop 无实例 -> no-op 不报错
+	// 幂等：再次 stop 无本地行 -> 仍调 manager.Delete（manager 端幂等；#320 修复：
+	// 本地行缺失时也必须到达 manager，否则孤儿实例永远销毁不掉）
 	if err := svc.StopAgent(ctx, 9); err != nil {
 		t.Fatalf("second stop: %v", err)
 	}
 	mgr.mu.Lock()
 	deleted = len(mgr.deleteCalls)
 	mgr.mu.Unlock()
-	if deleted != 1 {
-		t.Fatalf("manager delete calls after second stop = %d, want 1 (idempotent)", deleted)
+	if deleted != 2 {
+		t.Fatalf("manager delete calls after second stop = %d, want 2 (must always reach manager)", deleted)
+	}
+	if len(prov.revoked) != 1 {
+		t.Fatalf("revoked after second stop = %v, want still [%d] (no key to revoke without row)", prov.revoked, keyID)
 	}
 }
 
@@ -578,21 +594,21 @@ func TestAgentServiceV2Config(t *testing.T) {
 	svc := newTestAgentServiceV2(mgr, prov, store)
 	ctx := context.Background()
 
-	// 全局配置默认值
+	// 全局配置默认值（含 idle_timeout_minutes 默认 30）
 	cfg, err := svc.GetAgentConfig(ctx)
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if cfg.DataRetentionHours != 72 || cfg.WorkspaceQuotaMB != 250 || cfg.MemoryMB != 96 {
-		t.Fatalf("default config = %+v, want 72/250/96", cfg)
+	if cfg.DataRetentionHours != 72 || cfg.WorkspaceQuotaMB != 250 || cfg.MemoryMB != 96 || cfg.IdleTimeoutMinutes != 30 {
+		t.Fatalf("default config = %+v, want 72/250/96/30", cfg)
 	}
 
 	// 更新全局配置
-	upd, err := svc.UpdateAgentConfig(ctx, AgentConfig{DataRetentionHours: 48, WorkspaceQuotaMB: 512, MemoryMB: 128})
+	upd, err := svc.UpdateAgentConfig(ctx, AgentConfig{DataRetentionHours: 48, WorkspaceQuotaMB: 512, MemoryMB: 128, IdleTimeoutMinutes: 45})
 	if err != nil {
 		t.Fatalf("update config: %v", err)
 	}
-	if upd.DataRetentionHours != 48 || upd.MemoryMB != 128 {
+	if upd.DataRetentionHours != 48 || upd.MemoryMB != 128 || upd.IdleTimeoutMinutes != 45 {
 		t.Fatalf("updated config = %+v", upd)
 	}
 
@@ -605,12 +621,73 @@ func TestAgentServiceV2Config(t *testing.T) {
 		t.Fatalf("effective = %+v, want memory 256 (override) + quota 512 (global)", ucfg.Effective)
 	}
 
+	// 每用户 idle 覆盖
+	ucfg3, err := svc.UpdateAgentUserConfig(ctx, 42, map[string]int{"idle_timeout_minutes": 15})
+	if err != nil {
+		t.Fatalf("update user idle override: %v", err)
+	}
+	if ucfg3.Effective.IdleTimeoutMinutes != 15 {
+		t.Fatalf("effective idle = %+v, want 15 (override)", ucfg3.Effective)
+	}
+
 	// 清除覆盖回退全局
-	ucfg2, err := svc.UpdateAgentUserConfig(ctx, 42, map[string]int{"memory_mb": 0})
+	ucfg2, err := svc.UpdateAgentUserConfig(ctx, 42, map[string]int{"memory_mb": 0, "idle_timeout_minutes": 0})
 	if err != nil {
 		t.Fatalf("clear override: %v", err)
 	}
-	if ucfg2.Effective.MemoryMB != 128 {
-		t.Fatalf("effective after clear = %+v, want memory 128 (global)", ucfg2.Effective)
+	if ucfg2.Effective.MemoryMB != 128 || ucfg2.Effective.IdleTimeoutMinutes != 45 {
+		t.Fatalf("effective after clear = %+v, want memory 128 + idle 45 (global)", ucfg2.Effective)
+	}
+}
+
+func TestPickAgentGroup(t *testing.T) {
+	mk := func(id int64, platform string, rate float64) Group {
+		return Group{ID: id, Platform: platform, RateMultiplier: rate}
+	}
+	// 空列表 -> (_, false)
+	if _, ok := pickAgentGroup(nil); ok {
+		t.Fatal("empty list should return ok=false")
+	}
+
+	// 只有 openai：选倍率最低
+	got, ok := pickAgentGroup([]Group{mk(1, "anthropic", 0.4), mk(2, "openai", 0.1), mk(3, "openai", 0.3)})
+	if !ok || got.ID != 2 {
+		t.Fatalf("want openai rate-lowest group 2, got %+v ok=%v", got, ok)
+	}
+
+	// 无 openai：任选倍率最低
+	got, ok = pickAgentGroup([]Group{mk(1, "anthropic", 0.9), mk(2, "grok", 0.2), mk(3, "anthropic", 0.5)})
+	if !ok || got.ID != 2 {
+		t.Fatalf("want rate-lowest group 2 (no openai), got %+v ok=%v", got, ok)
+	}
+
+	// openai 倍率高于 anthropic：仍优先 openai
+	got, ok = pickAgentGroup([]Group{mk(1, "anthropic", 0.05), mk(2, "openai", 0.5)})
+	if !ok || got.ID != 2 {
+		t.Fatalf("want openai group 2 despite higher rate, got %+v ok=%v", got, ok)
+	}
+
+	// 同平台同倍率：ID 小者先
+	got, ok = pickAgentGroup([]Group{mk(5, "openai", 0.1), mk(3, "openai", 0.1)})
+	if !ok || got.ID != 3 {
+		t.Fatalf("want ID 3 on tie, got %+v ok=%v", got, ok)
+	}
+}
+
+func TestAgentServiceV2StartPassesModels(t *testing.T) {
+	mgr := newMockAgentManagerV2()
+	prov := &mockAgentProvisionerV2{}
+	store := newMockAgentStoreV2()
+	svc := newTestAgentServiceV2(mgr, prov, store)
+	ctx := context.Background()
+
+	if _, err := svc.StartAgent(ctx, 42); err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+	mgr.mu.Lock()
+	models := append([]string(nil), mgr.lastModels...)
+	mgr.mu.Unlock()
+	if len(models) != 1 || models[0] != "deepseek-v4-flash" {
+		t.Fatalf("models passed to manager = %v, want [deepseek-v4-flash]", models)
 	}
 }

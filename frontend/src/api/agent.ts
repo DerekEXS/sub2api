@@ -23,10 +23,12 @@ export interface AgentState {
   agent_url?: string
   access_host?: string
   access_password?: string
-  idle_deadline?: number // unix 秒（0 = 无）
-  retain_deadline?: number // unix 秒
-  hardcap_deadline?: number // unix 秒
+  idle_deadline?: number // unix 秒 或相对秒数（0 = 无）
+  retain_deadline?: number // unix 秒 或相对秒数
+  hardcap_deadline?: number // unix 秒 或相对秒数
   position?: number // queued 时的排队位置
+  idle_timeout_minutes?: number // 空闲自动销毁超时（分钟，供前端展示）
+  data_retention_hours?: number // 关闭后数据保留时长（小时，供前端展示）
   created_at?: string
 }
 
@@ -35,7 +37,9 @@ export interface AgentState {
  * 返回 active(201)/queued(202)/already(200) 三种状态。
  */
 export async function start(): Promise<AgentState> {
-  const { data } = await apiClient.post<AgentState>('/agent/start')
+  // 容器创建是同步慢操作（docker run + launcher 初始化，可达 60-150s），
+  // 必须大于后端 managerCreateTimeout(150s)，避免首次启动被默认 30s 超时误杀（#320）
+  const { data } = await apiClient.post<AgentState>('/agent/start', undefined, { timeout: 180000 })
   return data
 }
 

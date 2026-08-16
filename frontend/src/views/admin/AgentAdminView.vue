@@ -28,7 +28,7 @@
     <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6 mb-6">
       <h2 class="text-xl font-semibold mb-4">{{ t('admin.agent.globalConfig') }}</h2>
       <div v-if="configLoading" class="text-gray-500 text-sm">{{ t('admin.agent.loading') }}</div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-else class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
           <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
           <input
@@ -53,6 +53,15 @@
             v-model.number="configForm.memory_mb"
             type="number"
             min="16"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
+          />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.idleMinutes') }}</label>
+          <input
+            v-model.number="configForm.idle_timeout_minutes"
+            type="number"
+            min="5"
             class="w-full px-3 py-2 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-sm"
           />
         </div>
@@ -125,7 +134,7 @@
           <!-- 每用户配置行内编辑 -->
           <tr v-if="editUserId === a.user_id" class="bg-blue-50/50 dark:bg-blue-900/10 border-b border-gray-100 dark:border-dark-700">
             <td colspan="5" class="py-3 px-2">
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+              <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
                 <div>
                   <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.retentionHours') }}</label>
                   <input
@@ -153,6 +162,15 @@
                     class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
                   />
                 </div>
+                <div>
+                  <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">{{ t('admin.agent.idleMinutes') }}</label>
+                  <input
+                    v-model.number="userForm.idle_timeout_minutes"
+                    type="number"
+                    min="5"
+                    class="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-600 rounded-md bg-white dark:bg-dark-700 text-xs"
+                  />
+                </div>
                 <div class="flex gap-2">
                   <button
                     @click="saveUserConfig"
@@ -176,47 +194,6 @@
       </table>
     </div>
 
-    <!-- 注册风险审计名单 -->
-    <div class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold">{{ t('admin.agent.auditTitle') }}（{{ auditCount }}）</h2>
-        <button
-          @click="refreshAudit"
-          class="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500 text-gray-800 dark:text-gray-200 rounded-md text-sm transition-colors"
-        >
-          {{ t('admin.agent.refresh') }}
-        </button>
-      </div>
-
-      <div v-if="auditLoading" class="text-center py-8 text-gray-500">{{ t('admin.agent.loading') }}</div>
-      <div v-else-if="auditItems.length === 0" class="text-center py-8 text-gray-500">{{ t('admin.agent.noAudit') }}</div>
-      <table v-else class="w-full text-sm">
-        <thead>
-          <tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-dark-600">
-            <th class="py-2 pr-4">{{ t('admin.agent.colUser') }}</th>
-            <th class="py-2 pr-4">{{ t('admin.agent.colScore') }}</th>
-            <th class="py-2 pr-4">{{ t('admin.agent.colStrong') }}</th>
-            <th class="py-2 pr-4">{{ t('admin.agent.colInvited') }}</th>
-            <th class="py-2 pr-4">{{ t('admin.agent.colIp') }}</th>
-            <th class="py-2">{{ t('admin.agent.colTime') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in auditItems" :key="item.user_id" class="border-b border-gray-100 dark:border-dark-700">
-            <td class="py-2 pr-4 font-mono">{{ item.user_id }}</td>
-            <td class="py-2 pr-4">
-              <span :class="item.score >= 60 ? 'text-red-600 font-bold' : item.score >= 40 ? 'text-yellow-600' : 'text-gray-600'">
-                {{ item.score }}
-              </span>
-            </td>
-            <td class="py-2 pr-4">{{ item.strong ? '⚠️' : '—' }}</td>
-            <td class="py-2 pr-4">{{ item.invited ? '✓' : '—' }}</td>
-            <td class="py-2 pr-4 font-mono text-xs">{{ item.ip }}</td>
-            <td class="py-2 font-mono text-xs">{{ fmtTs(item.created_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
   </div>
   </AppLayout>
 </template>
@@ -226,29 +203,27 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAdminAPI } from '@/api/admin/agents'
 import type { AgentState } from '@/api/agent'
-import type { AgentPoolStats, AgentConfig, RegistrationAuditItem } from '@/api/admin/agents'
+import type { AgentPoolStats, AgentConfig } from '@/api/admin/agents'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
 
 const agents = ref<AgentState[]>([])
 const pool = ref<AgentPoolStats>({ free_gb: 0, active: 0, queued: 0, archived: 0 })
-const auditItems = ref<RegistrationAuditItem[]>([])
-const auditCount = ref(0)
 const loading = ref(false)
-const auditLoading = ref(false)
 
 // 全局配置
 const configLoading = ref(false)
 const configSaved = ref(false)
-const configForm = ref<AgentConfig>({ data_retention_hours: 72, workspace_quota_mb: 250, memory_mb: 96 })
+const configForm = ref<AgentConfig>({ data_retention_hours: 72, workspace_quota_mb: 250, memory_mb: 96, idle_timeout_minutes: 30 })
 
 // 每用户配置
 const editUserId = ref(0)
-const userForm = ref<{ data_retention_hours: number; workspace_quota_mb: number; memory_mb: number; note: string }>({
+const userForm = ref<{ data_retention_hours: number; workspace_quota_mb: number; memory_mb: number; idle_timeout_minutes: number; note: string }>({
   data_retention_hours: 0,
   workspace_quota_mb: 0,
   memory_mb: 0,
+  idle_timeout_minutes: 0,
   note: '',
 })
 
@@ -256,7 +231,12 @@ const loadGlobalConfig = async () => {
   configLoading.value = true
   try {
     const cfg = await agentAdminAPI.getAgentConfig()
-    configForm.value = { ...cfg }
+    configForm.value = {
+      data_retention_hours: cfg.data_retention_hours ?? 72,
+      workspace_quota_mb: cfg.workspace_quota_mb ?? 250,
+      memory_mb: cfg.memory_mb ?? 96,
+      idle_timeout_minutes: cfg.idle_timeout_minutes ?? 30,
+    }
   } catch (e) {
     console.error('Failed to load agent config:', e)
   } finally {
@@ -281,16 +261,18 @@ const toggleUserConfig = async (userId: number) => {
     return
   }
   editUserId.value = userId
-  userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, note: '' }
+  userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
   try {
     const cfg = await agentAdminAPI.getAgentUserConfig(userId)
     userForm.value.data_retention_hours = cfg.overrides?.data_retention_hours || 0
     userForm.value.workspace_quota_mb = cfg.overrides?.workspace_quota_mb || 0
     userForm.value.memory_mb = cfg.overrides?.memory_mb || 0
+    userForm.value.idle_timeout_minutes = cfg.overrides?.idle_timeout_minutes || 0
     userForm.value.note = t('admin.agent.effectiveHint', {
       retention: cfg.effective?.data_retention_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
+      idle: cfg.effective?.idle_timeout_minutes ?? '—',
     })
   } catch (e) {
     console.error('Failed to load user config:', e)
@@ -304,11 +286,13 @@ const saveUserConfig = async () => {
       data_retention_hours: userForm.value.data_retention_hours,
       workspace_quota_mb: userForm.value.workspace_quota_mb,
       memory_mb: userForm.value.memory_mb,
+      idle_timeout_minutes: userForm.value.idle_timeout_minutes,
     })
     userForm.value.note = t('admin.agent.effectiveHint', {
       retention: cfg.effective?.data_retention_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
+      idle: cfg.effective?.idle_timeout_minutes ?? '—',
     })
   } catch (e) {
     console.error('Failed to save user config:', e)
@@ -322,12 +306,14 @@ const clearUserConfig = async () => {
       data_retention_hours: 0,
       workspace_quota_mb: 0,
       memory_mb: 0,
+      idle_timeout_minutes: 0,
     })
-    userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, note: '' }
+    userForm.value = { data_retention_hours: 0, workspace_quota_mb: 0, memory_mb: 0, idle_timeout_minutes: 0, note: '' }
     userForm.value.note = t('admin.agent.effectiveHint', {
       retention: cfg.effective?.data_retention_hours ?? '—',
       quota: cfg.effective?.workspace_quota_mb ?? '—',
       memory: cfg.effective?.memory_mb ?? '—',
+      idle: cfg.effective?.idle_timeout_minutes ?? '—',
     })
   } catch (e) {
     console.error('Failed to clear user config:', e)
@@ -357,15 +343,6 @@ const fmtDeadline = (ts?: number): string => {
   return new Date(ts * 1000).toLocaleString()
 }
 
-const fmtTs = (s?: string): string => {
-  if (!s) return '—'
-  const n = Number(s)
-  if (Number.isFinite(n) && n > 0) {
-    return new Date(n * 1000).toLocaleString()
-  }
-  return s
-}
-
 const refresh = async () => {
   loading.value = true
   try {
@@ -376,19 +353,6 @@ const refresh = async () => {
     console.error('Failed to list agents:', e)
   } finally {
     loading.value = false
-  }
-}
-
-const refreshAudit = async () => {
-  auditLoading.value = true
-  try {
-    const data = await agentAdminAPI.listRegistrationAudit()
-    auditItems.value = data.items || []
-    auditCount.value = data.count ?? auditItems.value.length
-  } catch (e) {
-    console.error('Failed to list registration audit:', e)
-  } finally {
-    auditLoading.value = false
   }
 }
 
@@ -412,7 +376,6 @@ const downloadArchive = async (userId: number) => {
 
 onMounted(() => {
   refresh()
-  refreshAudit()
   loadGlobalConfig()
 })
 </script>

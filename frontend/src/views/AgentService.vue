@@ -45,6 +45,7 @@
             {{ t('agentService.downloadButton') }}
           </button>
         </div>
+        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t('agentService.launchNote') }}</p>
 
         <!-- Queued / Countdown Info -->
         <div v-if="agentStatus === 'queued'" class="mt-4 p-3 rounded-md bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-sm">
@@ -52,7 +53,7 @@
           <span v-else>{{ t('agentService.queuedProvisioning') }}</span>
         </div>
 
-        <!-- 生命周期倒计时（active 时显示） -->
+        <!-- 生命周期倒计时（running 时显示） -->
         <div v-if="agentStatus === 'running' && (hardcapCountdown || retainCountdown)" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
           <div v-if="idleCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
             <div class="text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.idleLabel') }}</div>
@@ -67,83 +68,28 @@
             <code class="font-mono text-base">{{ hardcapCountdown }}</code>
           </div>
         </div>
+
+        <!-- 8 位专属访问密码（running 时显示） -->
+        <div v-if="agentStatus === 'running' && accessPassword" class="mt-4 flex flex-wrap items-center gap-3 bg-gray-50 dark:bg-dark-700 rounded-md p-3 text-sm">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('agentService.passwordLabel') }}</span>
+          <code class="font-mono text-base break-all">{{ accessPassword }}</code>
+          <button
+            @click="copyPassword"
+            class="px-3 py-1 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-xs transition-colors"
+          >
+            {{ copied ? t('agentService.copied') : t('agentService.copyButton') }}
+          </button>
+        </div>
       </div>
 
-      <!-- Agent UI: iframe (if gateway has HTML) or status panel (fallback) -->
-      <div v-if="agentUrl && agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4">
-        <!-- Has Web UI: show iframe -->
-        <template v-if="hasWebUI">
-          <div class="flex justify-between items-center mb-3">
-            <h3 class="text-lg font-medium">{{ t('agentService.agentUiTitle') }}</h3>
-            <a
-              :href="agentUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm"
-            >
-              {{ t('agentService.openInNewWindow') }}
-            </a>
-          </div>
-          <iframe
-            :src="agentUrl"
-            class="w-full h-[600px] border rounded-md"
-            title="PicoClaw Agent"
-          ></iframe>
-        </template>
-
-        <!-- No Web UI: show status panel with connection info -->
-        <template v-else>
-          <div class="flex justify-between items-center mb-3">
-            <h3 class="text-lg font-medium">{{ t('agentService.agentInfoTitle') }}</h3>
-            <a
-              :href="agentUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm"
-            >
-              {{ t('agentService.openGateway') }}
-            </a>
-          </div>
-          <div class="space-y-4">
-            <!-- Connection Info -->
-            <div class="bg-gray-50 dark:bg-dark-700 rounded-md p-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.apiEndpoint') }}</div>
-                  <code class="text-sm font-mono break-all">{{ agentUrl }}</code>
-                </div>
-                <div v-if="accessHost">
-                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.accessHost') }}</div>
-                  <code class="text-sm font-mono break-all">{{ accessHost }}</code>
-                </div>
-                <div v-if="accessPassword">
-                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.accessPassword') }}</div>
-                  <code class="text-sm font-mono break-all">{{ accessPassword }}</code>
-                </div>
-                <div>
-                  <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.healthCheck') }}</div>
-                  <code class="text-sm font-mono break-all">{{ agentUrl }}/health</code>
-                </div>
-              </div>
-            </div>
-
-            <!-- Quick Start Guide -->
-            <div class="bg-blue-50 dark:bg-blue-900/20 rounded-md p-4">
-              <h4 class="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">{{ t('agentService.quickStartTitle') }}</h4>
-              <ol class="list-decimal list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
-                <li>{{ t('agentService.quickStartStep1') }}</li>
-                <li>{{ t('agentService.quickStartStep2') }}</li>
-                <li>{{ t('agentService.quickStartStep3') }}</li>
-              </ol>
-            </div>
-
-            <!-- Health Status -->
-            <div class="flex items-center gap-2 text-sm">
-              <span v-if="healthOk" class="text-green-600 dark:text-green-400">✓ {{ t('agentService.healthOk') }}</span>
-              <span v-else class="text-yellow-600 dark:text-yellow-400">⚪ {{ t('agentService.healthChecking') }}</span>
-            </div>
-          </div>
-        </template>
+      <!-- Agent WebUI：同源 iframe 直接嵌入（不暴露任何 IP/URL） -->
+      <div v-if="agentStatus === 'running'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-4">
+        <h3 class="text-lg font-medium mb-3">{{ t('agentService.agentUiTitle') }}</h3>
+        <iframe
+          :src="'/api/v1/agent/ui/'"
+          class="w-full h-[600px] border rounded-md"
+          title="PicoClaw Agent"
+        ></iframe>
       </div>
 
       <!-- Empty State -->
@@ -151,7 +97,9 @@
         <div class="text-4xl mb-4">🤖</div>
         <h3 class="text-lg font-medium mb-2">{{ t('agentService.emptyTitle') }}</h3>
         <p class="text-gray-600 dark:text-gray-400 mb-4">{{ t('agentService.emptyHint') }}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-500">{{ t('agentService.emptyNote') }}</p>
+        <p class="text-sm text-gray-500 dark:text-gray-500">
+          {{ t('agentService.emptyNote', { X: idleTimeoutMinutes, Y: dataRetentionHours }) }}
+        </p>
       </div>
     </div>
   </div>
@@ -159,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { agentAPI } from '@/api/agent'
 import type { AgentState } from '@/api/agent'
@@ -176,20 +124,19 @@ type AgentUiStatus =
   | 'error'
 
 const agentStatus = ref<AgentUiStatus>('not_started')
-const agentUrl = ref('')
-const agentPort = ref(0)
-const accessHost = ref('')
 const accessPassword = ref('')
 const position = ref(0)
 const idleDeadline = ref(0)
 const retainDeadline = ref(0)
 const hardcapDeadline = ref(0)
+const idleTimeoutMinutes = ref(30) // 后端未提供时默认 30 分钟
+const dataRetentionHours = ref(72) // 后端未提供时默认 72 小时
 const errorMessage = ref('')
-const hasWebUI = ref(false)
-const healthOk = ref(false)
+const copied = ref(false)
 const nowTs = ref(Math.floor(Date.now() / 1000))
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
+let copyTimer: ReturnType<typeof setTimeout> | null = null
 
 const statusText = computed(() => {
   switch (agentStatus.value) {
@@ -226,9 +173,15 @@ const badgeClass = computed(() => {
   }
 })
 
+/**
+ * 倒计时格式化：兼容两种 deadline 格式
+ * - 相对秒数（< 10^10，如 259200）= now + deadline 秒
+ * - unix 时间戳（>= 10^10）
+ */
 const fmtCountdown = (deadline: number): string => {
   if (!deadline) return ''
-  const diff = Math.max(0, deadline - nowTs.value)
+  const abs = deadline < 1e10 ? nowTs.value + deadline : deadline
+  const diff = Math.max(0, abs - nowTs.value)
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
   const s = diff % 60
@@ -252,33 +205,13 @@ const stopPolling = () => {
 }
 
 const applyState = (state: AgentState) => {
-  agentPort.value = state.port || 0
-  accessHost.value = state.access_host || ''
   accessPassword.value = state.access_password || ''
   position.value = state.position || 0
   idleDeadline.value = state.idle_deadline || 0
   retainDeadline.value = state.retain_deadline || 0
   hardcapDeadline.value = state.hardcap_deadline || 0
-}
-
-/**
- * 探测网关是否有 HTML 响应（PicoClaw gateway 无内嵌 Web UI，根路径返回 JSON/404）。
- * 如果不是 HTML，前端显示状态面板+接入指引替代空白 iframe。
- */
-const probeWebUI = async (url: string) => {
-  if (!url) {
-    hasWebUI.value = false
-    return
-  }
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
-    const ct = resp.headers.get('content-type') || ''
-    hasWebUI.value = ct.includes('text/html')
-    healthOk.value = resp.ok || resp.status === 404 // 404 说明网关在线但没有根页面
-  } catch {
-    hasWebUI.value = false
-    healthOk.value = false
-  }
+  idleTimeoutMinutes.value = state.idle_timeout_minutes || 30
+  dataRetentionHours.value = state.data_retention_hours || 72
 }
 
 const startClock = () => {
@@ -297,14 +230,12 @@ const startPolling = () => {
       const state = await agentAPI.status()
       if (state.status === 'active' || state.status === 'running') {
         agentStatus.value = 'running'
-        agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
         applyState(state)
       } else if (state.status === 'queued' || state.status === 'provisioning') {
         agentStatus.value = 'queued'
         applyState(state)
       } else if (state.status === 'stopped' || state.status === 'not_started' || state.status === 'retained') {
         agentStatus.value = 'not_started'
-        agentUrl.value = ''
         stopPolling()
       }
     } catch {
@@ -318,9 +249,7 @@ const syncStatus = async () => {
     const state = await agentAPI.status()
     if (state.status === 'active' || state.status === 'running') {
       agentStatus.value = 'running'
-      agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
       applyState(state)
-      await probeWebUI(state.agent_url || '')
       startPolling()
       startClock()
     } else if (state.status === 'queued' || state.status === 'provisioning') {
@@ -328,10 +257,10 @@ const syncStatus = async () => {
       applyState(state)
       startPolling()
       startClock()
-    } else if (state.status === 'stopped' || state.status === 'retained') {
+    } else {
       agentStatus.value = 'not_started'
-    } else if (state.status === 'not_started') {
-      agentStatus.value = 'not_started'
+      // 未启动也读取配置字段（空闲超时/保留时长）供空状态文案展示
+      applyState(state)
     }
   } catch {
     // 未配置/后端不可达：保持 not_started
@@ -349,9 +278,7 @@ const startAgent = async () => {
     const state = await agentAPI.start()
     if (state.status === 'active' || state.status === 'running') {
       agentStatus.value = 'running'
-      agentUrl.value = state.agent_url || `https://${state.access_host || ''}`
       applyState(state)
-      await probeWebUI(state.agent_url || '')
       startPolling()
       startClock()
     } else if (state.status === 'queued' || state.status === 'provisioning') {
@@ -361,11 +288,12 @@ const startAgent = async () => {
       startClock()
     } else {
       agentStatus.value = 'not_started'
+      applyState(state)
     }
   } catch (error: any) {
     console.error('Failed to start agent:', error)
     agentStatus.value = 'error'
-    errorMessage.value = error?.message || t('agentService.startError')
+    errorMessage.value = t('agentService.startError')
   }
 }
 
@@ -378,15 +306,12 @@ const stopAgent = async () => {
   try {
     await agentAPI.stop()
     agentStatus.value = 'not_started'
-    agentUrl.value = ''
     applyState({ status: 'not_started' })
-    hasWebUI.value = false
-    healthOk.value = false
     stopPolling()
   } catch (error: any) {
     console.error('Failed to stop agent:', error)
     agentStatus.value = 'running'
-    errorMessage.value = error?.message || t('agentService.stopError')
+    errorMessage.value = t('agentService.stopError')
   }
 }
 
@@ -395,16 +320,36 @@ const downloadArchive = async () => {
   try {
     await agentAPI.downloadArchive()
   } catch (error: any) {
-    errorMessage.value = error?.message || t('agentService.downloadError')
+    console.error('Failed to download archive:', error)
+    errorMessage.value = t('agentService.downloadError')
   }
 }
 
-// 当 agentUrl 变化时重新探测
-watch(agentUrl, (url) => {
-  if (url && agentStatus.value === 'running') {
-    probeWebUI(url)
+/** 复制访问密码到剪贴板，成功显示 ✓ 提示 2 秒 */
+const copyPassword = async () => {
+  if (!accessPassword.value) return
+  try {
+    await navigator.clipboard.writeText(accessPassword.value)
+  } catch {
+    // 非安全上下文兜底：textarea + execCommand
+    const ta = document.createElement('textarea')
+    ta.value = accessPassword.value
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } finally {
+      document.body.removeChild(ta)
+    }
   }
-})
+  copied.value = true
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => {
+    copied.value = false
+  }, 2000)
+}
 
 onMounted(() => {
   syncStatus()
@@ -412,6 +357,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPolling()
+  if (copyTimer) clearTimeout(copyTimer)
 })
 </script>
 

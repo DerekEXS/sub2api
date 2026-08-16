@@ -1706,6 +1706,101 @@
             </div>
           </div>
 
+          <!-- 注册风险审计 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ t("admin.settings.registrationAudit.title") }}
+                  </h2>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.registrationAudit.description") }}
+                  </p>
+                </div>
+                <button
+                  @click="refreshRegistrationAudit"
+                  class="rounded-md bg-gray-200 px-3 py-1.5 text-sm text-gray-800 transition-colors hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-200 dark:hover:bg-dark-500"
+                >
+                  {{ t("common.refresh") }}
+                </button>
+              </div>
+            </div>
+            <div class="p-6">
+              <div
+                v-if="registrationAuditLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+              <div
+                v-else-if="registrationAuditItems.length === 0"
+                class="py-8 text-center text-sm text-gray-500 dark:text-gray-400"
+              >
+                {{ t("admin.settings.registrationAudit.empty") }}
+              </div>
+              <table v-else class="w-full text-sm">
+                <thead>
+                  <tr
+                    class="border-b border-gray-200 text-left text-gray-500 dark:border-dark-600 dark:text-gray-400"
+                  >
+                    <th class="py-2 pr-4">
+                      {{ t("admin.settings.registrationAudit.colUser") }}
+                    </th>
+                    <th class="py-2 pr-4">
+                      {{ t("admin.settings.registrationAudit.colScore") }}
+                    </th>
+                    <th class="py-2 pr-4">
+                      {{ t("admin.settings.registrationAudit.colStrong") }}
+                    </th>
+                    <th class="py-2 pr-4">
+                      {{ t("admin.settings.registrationAudit.colInvited") }}
+                    </th>
+                    <th class="py-2 pr-4">
+                      {{ t("admin.settings.registrationAudit.colIp") }}
+                    </th>
+                    <th class="py-2">
+                      {{ t("admin.settings.registrationAudit.colTime") }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="item in registrationAuditItems"
+                    :key="item.user_id"
+                    class="border-b border-gray-100 dark:border-dark-700"
+                  >
+                    <td class="py-2 pr-4 font-mono">{{ item.user_id }}</td>
+                    <td class="py-2 pr-4">
+                      <span
+                        :class="
+                          item.score >= 60
+                            ? 'font-bold text-red-600 dark:text-red-400'
+                            : item.score >= 40
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-gray-600 dark:text-gray-400'
+                        "
+                      >
+                        {{ item.score }}
+                      </span>
+                    </td>
+                    <td class="py-2 pr-4">{{ item.strong ? '⚠️' : '—' }}</td>
+                    <td class="py-2 pr-4">{{ item.invited ? '✓' : '—' }}</td>
+                    <td class="py-2 pr-4 font-mono text-xs">{{ item.ip }}</td>
+                    <td class="py-2 font-mono text-xs">
+                      {{ fmtAuditTs(item.created_at) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <!-- API Key IP ACL Settings -->
           <div class="card">
             <div
@@ -8813,6 +8908,7 @@ import {
 } from "@/composables/useStepUp";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
+import { agentAdminAPI, type RegistrationAuditItem } from "@/api/admin/agents";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
@@ -8943,6 +9039,31 @@ const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const forwardedClientIpHeaderDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+
+// === 注册风险审计（原 Agent 管理，2026-08-16 移入系统设置 > 安全与认证）===
+const registrationAuditItems = ref<RegistrationAuditItem[]>([]);
+const registrationAuditLoading = ref(false);
+
+const fmtAuditTs = (s?: string): string => {
+  if (!s) return "—";
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0) {
+    return new Date(n * 1000).toLocaleString();
+  }
+  return s;
+};
+
+const refreshRegistrationAudit = async (): Promise<void> => {
+  registrationAuditLoading.value = true;
+  try {
+    const data = await agentAdminAPI.listRegistrationAudit();
+    registrationAuditItems.value = data.items || [];
+  } catch (e) {
+    console.error("Failed to list registration audit:", e);
+  } finally {
+    registrationAuditLoading.value = false;
+  }
+};
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
@@ -12589,6 +12710,7 @@ onMounted(() => {
   loadRectifierSettings();
   loadBetaPolicySettings();
   loadProviders();
+  refreshRegistrationAudit();
 });
 
 // =========================

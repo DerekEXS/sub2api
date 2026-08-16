@@ -165,6 +165,17 @@ export default {
         auditRetention: '操作日志保留天数',
         auditRetentionHint: '超过该天数的操作日志将被自动清理；填 0 表示永久保留（仅支持手动清空）。'
       },
+      registrationAudit: {
+        title: '注册风险审计',
+        description: '按注册风险评估分数列出高风险注册用户，供管理员核查处置。',
+        empty: '暂无标记注册',
+        colUser: '用户 ID',
+        colScore: '评分',
+        colStrong: '强信号',
+        colInvited: '邀请',
+        colIp: 'IP',
+        colTime: '创建时间',
+      },
       panelRateLimit: {
         title: '面板接口限流',
         description: '限制面板 API 的请求频率，防止高频刷接口（如用量统计、仪表盘查询）打爆数据库',

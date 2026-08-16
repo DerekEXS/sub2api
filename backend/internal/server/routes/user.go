@@ -96,6 +96,8 @@ func RegisterUserRoutes(
 			agent.POST("/stop", h.Agent.Stop)
 			agent.GET("/status", h.Agent.Status)
 			agent.GET("/archive", h.Agent.Archive)
+			agent.GET("/ui", h.Agent.UI)        // 实例 Web UI 反向代理（vhost）
+			agent.GET("/ui/*path", h.Agent.UI)  // Web UI 子路径 + WebSocket 透传
 		}
 
 		// 用户可用渠道（非管理员接口）

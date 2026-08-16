@@ -250,12 +250,15 @@ type ImageStorageConfig struct {
 }
 
 // AgentConfig 用户「Agent 服务」（NY PicoClaw 容器生命周期）配置
-// 四个键全部注册 SetDefault 空值，AutomaticEnv 才能通过 AGENT_* 环境变量覆盖（#108 教训）
+// 五个键全部注册 SetDefault 空值，AutomaticEnv 才能通过 AGENT_* 环境变量覆盖（#108 教训）
 type AgentConfig struct {
 	ManagerURL    string `mapstructure:"manager_url"`     // AGENT_MANAGER_URL: agent-manager daemon 地址（如 http://host.docker.internal:9180）
 	ManagerToken  string `mapstructure:"manager_token"`   // AGENT_MANAGER_TOKEN: X-Agent-Token 认证
 	ModelBaseURL  string `mapstructure:"model_base_url"`  // AGENT_MODEL_BASE_URL: 注入容器的模型 base_url（用户 key 对接的网关）
 	PublicURLBase string `mapstructure:"public_url_base"` // AGENT_PUBLIC_URL_BASE: 返回给前端的 agent_url 前缀（浏览器可达，如 http://192.168.31.90）
+	// UIVHostURL: /api/v1/agent/ui 反向代理目标（manager vhost 入口，如 http://127.0.0.1:28801）。
+	// 空 = 未配置，UI 端点返回 503 明确错误。
+	UIVHostURL string `mapstructure:"ui_vhost_url"` // AGENT_UI_VHOST_URL
 }
 
 // IsConfigured 检查 Agent 服务必要配置是否齐全
@@ -2181,6 +2184,7 @@ func setDefaults() {
 	viper.SetDefault("agent.manager_token", "")
 	viper.SetDefault("agent.model_base_url", "")
 	viper.SetDefault("agent.public_url_base", "")
+	viper.SetDefault("agent.ui_vhost_url", "")
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)

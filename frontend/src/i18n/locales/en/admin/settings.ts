@@ -165,6 +165,17 @@ export default {
         auditRetention: 'Audit Log Retention (days)',
         auditRetentionHint: 'Audit logs older than this are cleaned up automatically. Set to 0 to keep them forever (manual clear only).'
       },
+      registrationAudit: {
+        title: 'Registration Risk Audit',
+        description: 'Users flagged by the registration risk assessment, listed by score for admin review.',
+        empty: 'No flagged registrations',
+        colUser: 'User ID',
+        colScore: 'Score',
+        colStrong: 'Strong',
+        colInvited: 'Invited',
+        colIp: 'IP',
+        colTime: 'Created At',
+      },
       panelRateLimit: {
         title: 'Panel API Rate Limiting',
         description: 'Throttle panel API requests to keep high-frequency polling (usage stats, dashboard queries) from overwhelming the database',
