@@ -387,8 +387,10 @@ const destroyAgent = async (userId: number) => {
   try {
     await agentAdminAPI.deleteAgent(userId)
     await refresh()
-  } catch (e) {
+    window.alert(t('admin.agent.destroyed', { id: userId }))
+  } catch (e: any) {
     console.error('Failed to destroy agent:', e)
+    window.alert(`${t('admin.agent.destroyFailed')} ${e?.response?.data?.message || e?.message || ''}`)
   }
 }
 

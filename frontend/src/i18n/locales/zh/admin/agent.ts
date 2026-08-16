@@ -18,6 +18,8 @@ export default {
     download: '归档',
     destroy: '销毁',
     destroyConfirm: '销毁用户实例',
+    destroyed: '已销毁并归档（用户 {id}）：容器已删除，数据进入保留期，保留期内重启可恢复',
+    destroyFailed: '销毁失败：',
     globalConfig: '全局配置',
     retainHours: '保留期（小时）',
     hardcapHours: '硬顶（小时）',

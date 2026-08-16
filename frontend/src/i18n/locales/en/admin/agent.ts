@@ -18,6 +18,8 @@ export default {
     download: 'Archive',
     destroy: 'Destroy',
     destroyConfirm: 'Destroy instance of user',
+    destroyed: 'Destroyed & archived (user {id}): container removed, data in retention, restart within retention restores it',
+    destroyFailed: 'Destroy failed: ',
     globalConfig: 'Global Config',
     retainHours: 'Retention Period (hours)',
     hardcapHours: 'Hard Cap (hours)',
