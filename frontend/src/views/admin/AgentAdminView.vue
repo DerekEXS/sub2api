@@ -115,7 +115,7 @@
           <tr class="border-b border-gray-100 dark:border-dark-700">
             <td class="py-2 pr-4 font-mono">{{ a.user_id }}</td>
             <td class="py-2 pr-4">
-              <span :class="statusBadgeClass(a.status)" class="px-2 py-0.5 rounded-full text-xs">{{ a.status }}</span>
+              <span :class="statusBadgeClass(a.status)" class="px-2 py-0.5 rounded-full text-xs">{{ statusText(a.status) }}</span>
             </td>
             <td class="py-2 pr-4 font-mono text-xs">{{ a.access_host || '—' }}</td>
             <td class="py-2 pr-4 font-mono text-xs">{{ fmtDeadline(a.hardcap_deadline) }}</td>
@@ -343,6 +343,26 @@ const clearUserConfig = async () => {
     })
   } catch (e) {
     console.error('Failed to clear user config:', e)
+  }
+}
+
+const statusText = (status: string): string => {
+  switch (status) {
+    case 'active':
+    case 'running':
+      return t('admin.agent.statusActive')
+    case 'queued':
+      return t('admin.agent.statusQueued')
+    case 'provisioning':
+      return t('admin.agent.statusProvisioning')
+    case 'retained':
+      return t('admin.agent.statusRetained')
+    case 'over_quota':
+      return t('admin.agent.statusOverQuota')
+    case 'error':
+      return t('admin.agent.statusError')
+    default:
+      return status
   }
 }
 
