@@ -304,6 +304,8 @@ export default {
     sessionExpiredDesc: 'Please go back to the registration page and start again.',
     verificationCode: 'Verification Code',
     verificationCodeHint: 'Enter the 6-digit code sent to your email',
+    spamCheckHint: "If you haven't received the code, please check your spam folder first. Our emails may be filtered into spam by some providers.",
+    supportHint: 'If you still cannot receive the code, please contact support:',
     sendingCode: 'Sending...',
     sendCode: 'Send code',
     clickToResend: 'Click to resend code',

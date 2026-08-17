@@ -303,6 +303,8 @@ export default {
     sessionExpiredDesc: '请返回注册页面重新开始。',
     verificationCode: '验证码',
     verificationCodeHint: '请输入发送到您邮箱的6位验证码',
+    spamCheckHint: '如果没有收到验证码，请先检查垃圾邮件文件夹。本站邮件可能被部分邮箱拦截至垃圾箱。',
+    supportHint: '如果持续无法收到验证码，请联系客服寻求帮助：',
     sendingCode: '发送中...',
     sendCode: '发送验证码',
     clickToResend: '点击重新发送验证码',

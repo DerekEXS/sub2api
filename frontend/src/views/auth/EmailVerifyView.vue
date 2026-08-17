@@ -49,6 +49,20 @@
             placeholder="000000"
           />
           <p class="input-hint text-center">{{ t('auth.verificationCodeHint') }}</p>
+          <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-900/20">
+            <p class="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {{ t('auth.spamCheckHint') }}
+            </p>
+            <p class="mt-1 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {{ t('auth.supportHint') }}
+              <a
+                href="https://t.me/CloudZoneAPI_BOT"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-medium underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-300"
+              >@CloudZoneAPI_BOT</a>
+            </p>
+          </div>
         </div>
 
         <!-- Code Status -->
