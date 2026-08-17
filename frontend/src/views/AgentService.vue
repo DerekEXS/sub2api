@@ -319,7 +319,8 @@ const syncStatus = async () => {
 }
 
 const startAgent = async () => {
-  if (agentStatus.value !== 'not_started') return
+  // #issue3：retained 状态也允许重新启动（之前 guard 拦截了 retained → 点"重新启动"无反应）
+  if (agentStatus.value !== 'not_started' && agentStatus.value !== 'retained') return
 
   agentStatus.value = 'starting'
   errorMessage.value = ''

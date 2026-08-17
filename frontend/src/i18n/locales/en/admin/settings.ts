@@ -192,7 +192,7 @@ export default {
         configStrongThreshold: 'Strong Threshold',
         configStrongThresholdHint: 'Total score at or above this is marked ⚠️ strong (default 60)',
         configEmailLongLocal: 'Random-email Length',
-        configEmailLongLocalHint: 'Local part (before @) at or above this length looks machine-generated (default 14)',
+        configEmailLongLocalHint: "Local part (before {'@'}) at or above this length looks machine-generated (default 14)",
         configEmailVowelRatio: 'Random-email Vowel Ratio',
         configEmailVowelRatioHint: 'Local part with vowel ratio below this looks random (default 0.15; real names have more vowels)',
         configScoreEmailRandom: 'Random Email +pts',
