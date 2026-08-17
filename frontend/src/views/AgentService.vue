@@ -40,7 +40,7 @@
 
           <button
             @click="downloadArchive"
-            v-if="agentStatus === 'running' || agentStatus === 'not_started'"
+            v-if="agentStatus === 'running' || agentStatus === 'not_started' || agentStatus === 'retained'"
             class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500 text-gray-800 dark:text-gray-200 rounded-md transition-colors"
           >
             {{ t('agentService.downloadButton') }}
@@ -54,9 +54,9 @@
           <span v-else>{{ t('agentService.queuedProvisioning') }}</span>
         </div>
 
-        <!-- 生命周期倒计时（running 时显示） -->
-        <div v-if="agentStatus === 'running' && (hardcapCountdown || retainCountdown)" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-          <div v-if="idleCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
+        <!-- 生命周期倒计时（running 或 retained 时显示，#issue3：关闭后仍显示保留期+硬顶倒计时） -->
+        <div v-if="(agentStatus === 'running' || agentStatus === 'retained') && (hardcapCountdown || retainCountdown)" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div v-if="agentStatus === 'running' && idleCountdown" class="bg-gray-50 dark:bg-dark-700 rounded-md p-3">
             <div class="text-gray-500 dark:text-gray-400 mb-1">{{ t('agentService.idleLabel') }}</div>
             <code class="font-mono text-base">{{ idleCountdown }}</code>
           </div>
@@ -95,6 +95,19 @@
         ></iframe>
       </div>
 
+      <!-- Retained State（已关闭但数据保留中，#issue3） -->
+      <div v-else-if="agentStatus === 'retained'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-8 text-center">
+        <div class="text-4xl mb-4">📦</div>
+        <h3 class="text-lg font-medium mb-2">{{ t('agentService.retainedTitle') }}</h3>
+        <p class="text-gray-600 dark:text-gray-400 mb-6">{{ t('agentService.retainedHint') }}</p>
+        <button
+          @click="startAgent"
+          class="px-6 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+        >
+          {{ t('agentService.restartButton') }}
+        </button>
+      </div>
+
       <!-- Empty State -->
       <div v-else-if="agentStatus === 'not_started'" class="bg-white dark:bg-dark-800 rounded-lg shadow-md p-12 text-center">
         <div class="text-4xl mb-4">🤖</div>
@@ -128,6 +141,7 @@ type AgentUiStatus =
   | 'running'
   | 'queued'
   | 'stopping'
+  | 'retained'
   | 'error'
 
 const agentStatus = ref<AgentUiStatus>('not_started')
@@ -158,6 +172,8 @@ const statusText = computed(() => {
       return t('agentService.statusQueued')
     case 'stopping':
       return t('agentService.statusStopping')
+    case 'retained':
+      return t('agentService.statusRetained')
     case 'error':
       return t('agentService.statusError')
     default:
@@ -256,8 +272,15 @@ const startPolling = () => {
       } else if (state.status === 'queued' || state.status === 'provisioning') {
         agentStatus.value = 'queued'
         applyState(state)
-      } else if (state.status === 'stopped' || state.status === 'not_started' || state.status === 'retained') {
+      } else if (state.status === 'retained') {
+        // #issue3：关闭后仍显示倒计时（保留期+硬顶），让用户掌握数据清理时间
+        agentStatus.value = 'retained'
+        applyState(state)
+        startClock()
+      } else if (state.status === 'stopped' || state.status === 'not_started') {
         agentStatus.value = 'not_started'
+        // 未启动也读取配置字段（空闲超时/保留时长）供空状态文案展示 #issue2
+        applyState(state)
         stopPolling()
       }
     } catch {
@@ -279,9 +302,14 @@ const syncStatus = async () => {
       applyState(state)
       startPolling()
       startClock()
+    } else if (state.status === 'retained') {
+      // #issue3：关闭后仍显示倒计时
+      agentStatus.value = 'retained'
+      applyState(state)
+      startClock()
     } else {
       agentStatus.value = 'not_started'
-      // 未启动也读取配置字段（空闲超时/保留时长）供空状态文案展示
+      // 未启动也读取配置字段（空闲超时/保留时长）供空状态文案展示 #issue2
       applyState(state)
     }
   } catch {

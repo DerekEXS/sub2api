@@ -39,6 +39,20 @@ async function bootstrap() {
   const pinia = createPinia()
   app.use(pinia)
 
+  // #issue4：全局错误处理器——任何组件渲染/方法抛错时显式记录到 console + body，
+  // 避免静默"黑屏"（Vue 默认吞掉渲染异常只留空白页）。便于用户 F12 定位根因。
+  app.config.errorHandler = (err, _instance, info) => {
+    console.error('[Vue errorHandler]', info, err)
+    // 在页面顶部贴一条错误提示，让用户看到而非黑屏
+    try {
+      const banner = document.createElement('div')
+      banner.style.cssText =
+        'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;padding:8px 12px;font:13px/1.5 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto'
+      banner.textContent = `[页面渲染错误] ${info}\n${err instanceof Error ? err.stack || err.message : String(err)}\n请截图此信息反馈，或刷新页面重试。`
+      document.body.appendChild(banner)
+    } catch { /* ignore */ }
+  }
+
   // Initialize settings from injected config BEFORE mounting (prevents flash)
   // This must happen after pinia is installed but before router and i18n
   const appStore = useAppStore()

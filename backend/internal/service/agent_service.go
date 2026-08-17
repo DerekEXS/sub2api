@@ -57,6 +57,8 @@ type AgentV2State struct {
 	Position           int    `json:"position,omitempty"`            // queued 时的排队位置
 	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
 	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
+	RetainHours        int    `json:"retain_hours,omitempty"`        // 前端动态文案（小时，保留期）#issue2/3
+	HardcapHours       int    `json:"hardcap_hours,omitempty"`       // 前端动态文案（小时，硬顶）#issue2/3
 }
 
 // AgentPoolStats 是 manager 池统计。
@@ -625,11 +627,28 @@ type AgentState struct {
 	Position           int    `json:"position,omitempty"`
 	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
 	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
+	RetainHours        int    `json:"retain_hours,omitempty"`        // 前端动态文案（小时，保留期）#issue2/3
+	HardcapHours       int    `json:"hardcap_hours,omitempty"`       // 前端动态文案（小时，硬顶）#issue2/3
 	CreatedAt          string `json:"created_at,omitempty"`
 }
 
 func (s *AgentService) IsConfigured() bool {
 	return s.cfg.Agent.IsConfigured()
+}
+
+// notStartedWithDefaults 返回 not_started 状态，附带全局 Agent 配置默认值
+// （retain_hours/hardcap_hours/idle_timeout_minutes）。#issue2/3：前端在未启动时
+// 也能显示与实际配置一致的说明文案（而非硬编码 168h）。
+// manager GetConfig 失败时回退到 0（前端有 72/168/30 兜底默认）。
+func (s *AgentService) notStartedWithDefaults(ctx context.Context) *AgentState {
+	st := &AgentState{Status: "not_started"}
+	if cfg, err := s.manager.GetConfig(ctx); err == nil && cfg != nil {
+		st.RetainHours = cfg.RetainHours
+		st.HardcapHours = cfg.HardcapHours
+		st.IdleTimeoutMinutes = cfg.IdleTimeoutMinutes
+		st.DataRetentionHours = cfg.RetainHours // 兼容旧字段
+	}
+	return st
 }
 
 // StartAgent 启动用户 Agent 实例（薄代理到 manager Create）。
@@ -777,6 +796,8 @@ func (s *AgentService) StopAgent(ctx context.Context, userID int64) error {
 }
 
 // GetAgentStatus 返回用户实例状态（薄代理 manager Get；无实例 -> not_started）。
+// #issue2/3：not_started 时也返回全局配置默认值（retain_hours/hardcap_hours/idle_timeout_minutes），
+// 让前端说明文案与实际配置一致（否则前端永远显示硬编码默认 168h）。
 func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*AgentState, error) {
 	existing, err := s.store.GetByUser(ctx, userID)
 	if err != nil {
@@ -787,14 +808,14 @@ func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*Agent
 	if err != nil {
 		// manager 不可达：回退到库内记录（不致命）
 		if existing == nil {
-			return &AgentState{Status: "not_started"}, nil
+			return s.notStartedWithDefaults(ctx), nil
 		}
 		return s.mapRowToState(existing), nil
 	}
 	if st == nil {
 		// manager 无记录；若本地有记录则反映（可能 manager 已重置）
 		if existing == nil {
-			return &AgentState{Status: "not_started"}, nil
+			return s.notStartedWithDefaults(ctx), nil
 		}
 		return s.mapRowToState(existing), nil
 	}
@@ -810,6 +831,8 @@ func (s *AgentService) GetAgentStatus(ctx context.Context, userID int64) (*Agent
 		Position:           st.Position,
 		IdleTimeoutMinutes: st.IdleTimeoutMinutes,
 		DataRetentionHours: st.DataRetentionHours,
+		RetainHours:        st.RetainHours,
+		HardcapHours:       st.HardcapHours,
 	}
 	state.AgentURL = s.agentURL(st)
 	return state, nil
