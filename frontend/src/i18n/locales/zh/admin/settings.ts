@@ -198,7 +198,7 @@ export default {
         configScoreEmailRandom: '随机邮箱 +分',
         configScoreEmailRandomHint: '邮箱形态命中「随机串」特征时加的分（默认 +20）',
         configScoreEmailAlias: '别名邮箱 +分',
-        configScoreEmailAliasHint: '邮箱含 + 别名（如 user+123@gmail.com，小号工作室常用）时加的分（默认 +20）',
+        configScoreEmailAliasHint: "邮箱含 + 别名（如 user+123{'@'}gmail.com，小号工作室常用）时加的分（默认 +20）",
         configScoreEmailWhitelist: '白名单域名分',
         configScoreEmailWhitelistHint: '主流邮箱服务商（qq/163/gmail）注册时的加减分（默认 -10，即降低风险分）',
         configScoreRhythm: '10 分钟节奏 +分',

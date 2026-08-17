@@ -198,7 +198,7 @@ export default {
         configScoreEmailRandom: 'Random Email +pts',
         configScoreEmailRandomHint: 'Added when the email matches random-string traits (default +20)',
         configScoreEmailAlias: 'Alias Email +pts',
-        configScoreEmailAliasHint: 'Added for + aliases (user+123@gmail.com, common in bulk farms) (default +20)',
+        configScoreEmailAliasHint: "Added for + aliases (user+123{'@'}gmail.com, common in bulk farms) (default +20)",
         configScoreEmailWhitelist: 'Whitelist Domain pts',
         configScoreEmailWhitelistHint: 'Adjustment for mainstream providers (qq/163/gmail) (default -10, lowers risk)',
         configScoreRhythm: '10-min Rhythm +pts',
