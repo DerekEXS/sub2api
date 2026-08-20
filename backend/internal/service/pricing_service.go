@@ -21,6 +21,42 @@ import (
 	"go.uber.org/zap"
 )
 
+// ---------------------------------------------------------------------------
+// 官价回退链架构（fork 2026-08-21 主人规范 · maintenance overview）
+// ---------------------------------------------------------------------------
+//
+// 业务模型：用户实付价 = 模型官价 × 调用分组倍率（rate_multiplier / 谷峰 price /
+// 渠道 pricing 均叠加在官价之上）。因此官价是「展示基准 + 计费基准」，精确性优先；
+// 降价促销一律通过降分组倍率实现，绝不在官价层压价。
+//
+// 回退链（ResolveOfficialPricing 语义，全链路取高）：
+//   1. 强制锁定（fallback JSON 中 locked:true）：无论其它来源多高/多低，一律以
+//      锁定价为准。用于必须锁死的关键模型价，免疫上游涨价与自动同步覆盖。
+//   2. 手动设定（fallback JSON 普通条目）∨ 官方（LiteLLM 主文件）: 两者都存在时
+//      逐字段取高（mergeTakeMaxPricing）。涨价保护：官方/models.dev 涨价则自动跟高。
+//   3. 官方（LiteLLM 主文件 pricingData）∨ models.dev: 官方已命中时若 models.dev
+//      同模型价更高，再取高（官方 vs models.dev 冲突取高）。
+//   4. models.dev 精确匹配（官方无该模型时兜底）。
+//   5. models.dev 分支引导（gpt-5.6-terra-openai-compact -> gpt-5.6，
+//      复制主模型价格/参数/模态）。
+//   6. 均未命中 -> nil（plaza 显示 "-"；计费 fail-closed）。
+//
+// 合并时机（mergeFallbackPricingData）：
+//   - pricingData = LiteLLM 主文件 + fallback 合并。fallback 条目若 lock -> 直接覆盖；
+//     否则与已有官方价取高。
+//   - 查询时机（GetModelPricing / GetOfficialPricingPreferModelsDev）再与 models.dev
+//     取高（officialWithModelsDevLocked），实现全链路取高。
+//
+// 数据来源优先级：手动(fallback) 与 locked 是最高权威；models.dev 是实时官价辅助源
+// （30 分钟轮询热更新），仅兜底或抬高，不能压过 locked。
+//
+// 涉及函数：
+//   - mergeFallbackPricingData / mergeTakeMaxPricing：合并期取高与锁定
+//   - officialWithModelsDevLocked：查询期官方 vs models.dev 取高
+//   - GetModelPricing：计费基准解析（含取高）
+//   - GetOfficialPricingPreferModelsDev：plaza 官价列解析（含取高）
+// ---------------------------------------------------------------------------
+
 var (
 	openAIModelDatePattern     = regexp.MustCompile(`-\d{8}$`)
 	openAIModelBasePattern     = regexp.MustCompile(`^(gpt-\d+(?:\.\d+)?)(?:-|$)`)
@@ -131,6 +167,11 @@ type LiteLLMModelPricing struct {
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
 	// 否则 token 流量会被按 $0 计费。零值（false）表示条目具备 token 价格。
 	TokenPricingAbsent bool `json:"-"`
+
+	// PriceLocked 强制锁定官方价（fallback JSON 中 "locked": true）。
+	// 设定后无论回退链（手动/官方/models.dev）获取到任何价格，一律以本条目价格为准。
+	// 用于保护关键模型价格不被上游涨价/同步覆盖（2026-08-21 主人规范）。
+	PriceLocked bool `json:"locked,omitempty"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -160,6 +201,8 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImage                  *float64 `json:"output_cost_per_image"`
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
+	// PriceLocked 强制锁定官方价标记（fallback JSON "locked": true，2026-08-21 追加）
+	PriceLocked *bool `json:"locked"`
 }
 
 // PricingService 动态价格服务
@@ -495,6 +538,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			SupportsPromptCaching: entry.SupportsPromptCaching,
 			SupportsServiceTier:   entry.SupportsServiceTier,
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+			PriceLocked:           entry.PriceLocked != nil && *entry.PriceLocked,
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -608,18 +652,110 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
 		return data
 	}
-	merged := 0
-	for modelName, pricing := range fallbackData {
-		if _, ok := data[modelName]; ok {
+	merged, locked, overridden := 0, 0, 0
+	for modelName, fb := range fallbackData {
+		existing, ok := data[modelName]
+		if !ok {
+			// fallback 独有 → 直接加入
+			data[modelName] = fb
+			merged++
 			continue
 		}
-		data[modelName] = pricing
-		merged++
+		switch {
+		case fb.PriceLocked:
+			// 强制锁定：无论已有价格多少，一律以锁定价格为准（不受上游涨价/同步影响）
+			data[modelName] = fb
+			locked++
+		default:
+			// 回退链取高价：手动非锁定价与已有价（官方/models.dev）取最大，
+			// 满足"官方/models.dev 涨价则以最高价为准"的主人规范。
+			data[modelName] = mergeTakeMaxPricing(existing, fb)
+			overridden++
+		}
+	}
+	if locked > 0 {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback locked %d model prices (forced, immune to upstream)", locked)
+	}
+	if overridden > 0 {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merged %d existing model prices (take-higher)", overridden)
 	}
 	if merged > 0 {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
 	}
 	return data
+}
+
+// mergeTakeMaxPricing 回退链取高价合并：已有价（官方/models.dev）与手动非锁定价
+// 逐字段取最大。规则：input/output/cache read/write 等 token 价每个字段，若两边
+// 都有值取大者；仅一边有值则保留该值；图片/单请求价同理。锁定价（PriceLocked）
+// 不走此函数（直接覆盖，见 mergeFallbackPricingData）。
+func mergeTakeMaxPricing(existing, manual *LiteLLMModelPricing) *LiteLLMModelPricing {
+	if existing == nil {
+		return manual
+	}
+	if manual == nil {
+		return existing
+	}
+	out := *manual // 以手动为基础，逐字段取高
+	// token 价
+	if existing.InputCostPerToken > out.InputCostPerToken {
+		out.InputCostPerToken = existing.InputCostPerToken
+	}
+	if existing.OutputCostPerToken > out.OutputCostPerToken {
+		out.OutputCostPerToken = existing.OutputCostPerToken
+	}
+	if existing.CacheReadInputTokenCost > out.CacheReadInputTokenCost {
+		out.CacheReadInputTokenCost = existing.CacheReadInputTokenCost
+	}
+	if existing.CacheCreationInputTokenCost > out.CacheCreationInputTokenCost {
+		out.CacheCreationInputTokenCost = existing.CacheCreationInputTokenCost
+	}
+	if existing.CacheCreationInputTokenCostAbove1hr > out.CacheCreationInputTokenCostAbove1hr {
+		out.CacheCreationInputTokenCostAbove1hr = existing.CacheCreationInputTokenCostAbove1hr
+	}
+	if existing.OutputCostPerTokenPriority > out.OutputCostPerTokenPriority {
+		out.OutputCostPerTokenPriority = existing.OutputCostPerTokenPriority
+	}
+	// 图片 / 单请求价
+	if existing.OutputCostPerImage > out.OutputCostPerImage {
+		out.OutputCostPerImage = existing.OutputCostPerImage
+	}
+	if existing.OutputCostPerImageToken > out.OutputCostPerImageToken {
+		out.OutputCostPerImageToken = existing.OutputCostPerImageToken
+	}
+	if existing.InputCostPerImageToken > out.InputCostPerImageToken {
+		out.InputCostPerImageToken = existing.InputCostPerImageToken
+	}
+	return &out
+}
+
+// officialWithModelsDevLocked 查询期「官方 vs models.dev」取高：
+// 官方价（pricingData 已含 fallback 取高/锁定）若已命中，再看 models.dev 是否
+// 也有同模型价 —— 有则取更高者（全链路取高，涨价保护）。官方为锁定价时
+// （PriceLocked）直接返回，不参与取高（免疫上游）。
+// 调用方必须持有 s.mu 读锁。
+func (s *PricingService) officialWithModelsDevLocked(official *LiteLLMModelPricing, modelLower string) *LiteLLMModelPricing {
+	if official == nil || s.modelsDev == nil {
+		return official
+	}
+	if official.PriceLocked {
+		return official
+	}
+	// models.dev 精确
+	if m, ok := s.modelsDev.Lookup(modelLower); ok {
+		return mergeTakeMaxPricing(official, ModelsDevModelPricing(m))
+	}
+	// models.dev 分支引导（gpt-5.6-terra-openai-compact -> gpt-5.6）
+	if main, ok := resolveBranchToMainModel(branchModelCandidates(modelLower),
+		func(c string) bool {
+			_, ok := s.modelsDev.Lookup(c)
+			return ok
+		}); ok {
+		if m, ok2 := s.modelsDev.Lookup(main); ok2 {
+			return mergeTakeMaxPricing(official, ModelsDevModelPricing(m))
+		}
+	}
+	return official
 }
 
 // useFallbackPricing 使用回退价格文件
@@ -875,6 +1011,15 @@ func branchModelCandidates(model string) []string {
 		if strings.Contains(cur, ".") {
 			add(strings.ReplaceAll(cur, ".", "-"))
 		}
+		// 3.2 连字符版本号 → 点（doubao-seed-2-0-lite → doubao-seed-2.0-lite；
+		//     账号 openai 连字符命名 vs models.dev 点号命名，2026-08-21 doubao 修复）
+		if strings.Contains(cur, "-") {
+			// 仅把「数字-数字」形态的版本段替换为点（避免误伤 seed/evolving 等词）
+			hyphenDot := regexp.MustCompile(`(\d)-(\d)`).ReplaceAllString(cur, "$1.$2")
+			if hyphenDot != cur {
+				add(hyphenDot)
+			}
+		}
 	}
 	return out
 }
@@ -915,7 +1060,13 @@ func (s *PricingService) GetIdentifiedModelPricing(modelName string) *LiteLLMMod
 }
 
 // GetOfficialPricingPreferModelsDev 官方价格获取（plaza 展示用，fork 新增）。
-// 回退链：models.dev 精确 -> 分支引导 -> SUB2API 官方。
+// 回退链（用户 2026-08-21 规范，手动优先）：
+//  1. SUB2API 官方（LiteLLM 主文件 + fallback 手动覆盖，含变体/家族回退与分支引导）
+//  2. models.dev 精确匹配（实时官方价兜底）
+//  3. models.dev 分支模型引导
+//
+// 手动设定(fallback)优先于 models.dev：fallback 覆盖 pricingData 后，官方价即
+// 返回手动谷价。models.dev 仅在官方无该模型时兜底。
 func (s *PricingService) GetOfficialPricingPreferModelsDev(modelName string) *LiteLLMModelPricing {
 	if s == nil {
 		return nil
@@ -927,12 +1078,16 @@ func (s *PricingService) GetOfficialPricingPreferModelsDev(modelName string) *Li
 	if modelLower == "" {
 		return nil
 	}
-	// 1. models.dev 精确
+	// 1. SUB2API 官方（含 fallback 手动覆盖/锁定）优先，且与 models.dev 取高
+	if p := s.lookupIdentifiedModelPricingLocked(s.buildModelLookupCandidates(modelLower)); p != nil {
+		return s.officialWithModelsDevLocked(p, modelLower)
+	}
+	// 2. models.dev 精确
 	if s.modelsDev != nil {
 		if m, ok := s.modelsDev.Lookup(modelLower); ok {
 			return ModelsDevModelPricing(m)
 		}
-		// 2. models.dev 分支引导
+		// 3. models.dev 分支引导
 		if main, ok := resolveBranchToMainModel(branchModelCandidates(modelLower),
 			func(c string) bool {
 				_, ok := s.modelsDev.Lookup(c)
@@ -943,8 +1098,7 @@ func (s *PricingService) GetOfficialPricingPreferModelsDev(modelName string) *Li
 			}
 		}
 	}
-	// 3. SUB2API 官方（现有链 + 分支引导）
-	return s.GetModelPricing(modelName)
+	return nil
 }
 
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {

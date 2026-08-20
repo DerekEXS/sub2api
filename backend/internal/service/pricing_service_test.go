@@ -373,6 +373,7 @@ func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
 	require.NoError(t, err)
 
 	merged := svc.mergeFallbackPricingData(remoteData)
+	// 回退链取高价：manual 非锁定价 0.000001 与已有官方 0.000002 取最高 → 0.000002
 	require.InDelta(t, 0.000002, merged["remote-model"].InputCostPerToken, 1e-12)
 	require.NotNil(t, merged["gemini-3.1-flash-lite-image"])
 	require.InDelta(t, 0.034, merged["gemini-3.1-flash-lite-image"].OutputCostPerImage, 1e-12)
@@ -718,4 +719,68 @@ func TestListModelNamesByProvider_EmptyCatalog(t *testing.T) {
 	got := svc.ListModelNamesByProvider("openai")
 	require.NotNil(t, got)
 	require.Empty(t, got)
+}
+
+func TestPricingService_MergeFallbackTakeHigher(t *testing.T) {
+	dir := t.TempDir()
+	fallbackFile := filepath.Join(dir, "fallback.json")
+	// 手动非锁定价低于官方价 → 取高价（官方价保留）
+	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
+		"shared-model": {
+			"input_cost_per_token": 0.000001,
+			"output_cost_per_token": 0.000003,
+			"litellm_provider": "test",
+			"mode": "chat"
+		}
+	}`), 0644))
+
+	svc := &PricingService{cfg: &config.Config{}}
+	svc.cfg.Pricing.FallbackFile = fallbackFile
+	remoteData, err := svc.parsePricingData([]byte(`{
+		"shared-model": {
+			"input_cost_per_token": 0.000002,
+			"output_cost_per_token": 0.000002,
+			"litellm_provider": "test",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+
+	merged := svc.mergeFallbackPricingData(remoteData)
+	// 取高：input 0.000002 > 0.000001 → 0.000002；output 0.000003 > 0.000002 → 0.000003
+	require.InDelta(t, 0.000002, merged["shared-model"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 0.000003, merged["shared-model"].OutputCostPerToken, 1e-12)
+}
+
+func TestPricingService_MergeFallbackForceLocked(t *testing.T) {
+	dir := t.TempDir()
+	fallbackFile := filepath.Join(dir, "fallback.json")
+	// 强制定价：locked=true，无论官方价更高/更低一律以 locked 为准
+	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
+		"locked-model": {
+			"input_cost_per_token": 0.000004,
+			"output_cost_per_token": 0.000006,
+			"litellm_provider": "test",
+			"mode": "chat",
+			"locked": true
+		}
+	}`), 0644))
+
+	svc := &PricingService{cfg: &config.Config{}}
+	svc.cfg.Pricing.FallbackFile = fallbackFile
+	remoteData, err := svc.parsePricingData([]byte(`{
+		"locked-model": {
+			"input_cost_per_token": 0.000005,
+			"output_cost_per_token": 0.000007,
+			"litellm_provider": "test",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+
+	merged := svc.mergeFallbackPricingData(remoteData)
+	// locked 强制：即使官方更高，仍用 locked 的 0.000004/0.000006
+	require.InDelta(t, 0.000004, merged["locked-model"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 0.000006, merged["locked-model"].OutputCostPerToken, 1e-12)
+	require.True(t, merged["locked-model"].PriceLocked)
 }
