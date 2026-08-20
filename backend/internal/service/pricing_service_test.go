@@ -784,3 +784,28 @@ func TestPricingService_MergeFallbackForceLocked(t *testing.T) {
 	require.InDelta(t, 0.000006, merged["locked-model"].OutputCostPerToken, 1e-12)
 	require.True(t, merged["locked-model"].PriceLocked)
 }
+
+func TestBranchModelCandidates_DoubaoHyphenToDot(t *testing.T) {
+	cands := branchModelCandidates("doubao-seed-2-0-lite")
+	var found bool
+	for _, c := range cands {
+		if c == "doubao-seed-2.0-lite" {
+			found = true
+		}
+	}
+	require.True(t, found, "doubao 连字符版本号应归一为点号: %v", cands)
+
+	cands2 := branchModelCandidates("doubao-seed-2-1-turbo")
+	var found2 bool
+	for _, c := range cands2 {
+		if c == "doubao-seed-2.1-turbo" {
+			found2 = true
+		}
+	}
+	require.True(t, found2, "doubao-seed-2-1 应归一为 2.1: %v", cands2)
+
+	// 不应误伤普通连字符词（seed / evolving 等无数字-数字形态）
+	for _, c := range branchModelCandidates("doubao-seed-evolving") {
+		require.NotEqual(t, "doubao.seed-evolving", c)
+	}
+}

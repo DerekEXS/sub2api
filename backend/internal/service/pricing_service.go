@@ -999,6 +999,14 @@ func branchModelCandidates(model string) []string {
 		add(r.ReplaceAllString(lower, ""))
 	}
 	// 3. 逐段剥离最后一个 - 段（gpt-5.6-terra-openai-compact -> gpt-5.6-terra-openai -> gpt-5.6-terra -> gpt-5.6）
+	// 3.0 先对完整名做连字符版本号→点归一（doubao-seed-2-0-lite -> doubao-seed-2.0-lite，
+	//     保留完整后缀；剥离循环只对剥掉后缀的 cur 处理，会丢 lite 等段）
+	if strings.Contains(lower, "-") {
+		hyphenDot := regexp.MustCompile(`(\d)-(\d)`).ReplaceAllString(lower, "$1.$2")
+		if hyphenDot != lower {
+			add(hyphenDot)
+		}
+	}
 	cur := lower
 	for {
 		idx := strings.LastIndex(cur, "-")
