@@ -230,7 +230,7 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 		pricingData:  make(map[string]*LiteLLMModelPricing),
 		stopCh:       make(chan struct{}),
 	}
-	if cfg.Pricing.ModelsDevURL != "" {
+	if cfg != nil && cfg.Pricing.ModelsDevURL != "" {
 		s.modelsDev = NewModelsDevClient(cfg.Pricing.ModelsDevURL)
 	}
 	return s

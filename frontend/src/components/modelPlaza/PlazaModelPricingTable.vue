@@ -99,7 +99,7 @@
               <div class="whitespace-nowrap">
                 <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.maxOutput') }}</span>
                 <template v-if="(m.max_output ?? 0) > 0">{{ fmtContext(m.max_output ?? 0) }}</template>
-                <template v-else class="text-gray-300 dark:text-dark-600">-</template>
+                <template v-else><span class="text-gray-300 dark:text-dark-600">-</span></template>
               </div>
               <div class="whitespace-nowrap">
                 <span class="mr-1 font-sans font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.context') }}</span>
