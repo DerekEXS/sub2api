@@ -809,3 +809,248 @@ func TestBranchModelCandidates_DoubaoHyphenToDot(t *testing.T) {
 		require.NotEqual(t, "doubao.seed-evolving", c)
 	}
 }
+
+// ========== GetModelMetadata fallback 测试（2026-08-21 新增）==========
+// 覆盖 models.dev 未收录的模型（如豆包系）从 LiteLLM 上游 fallback JSON 携带的
+// max_input_tokens / max_output_tokens / supported_modalities_* 字段取元数据。
+
+// TestParsePricingData_PreservesMetadataFields 验证 parsePricingData 把 fallback JSON
+// 里的 max_input_tokens / max_output_tokens / supported_modalities_input /
+// supported_modalities_output 正确写入 LiteLLMModelPricing。
+func TestParsePricingData_PreservesMetadataFields(t *testing.T) {
+	svc := &PricingService{}
+	body := []byte(`{
+		"doubao-seed-2.1-turbo": {
+			"input_cost_per_token": 0.0000008,
+			"output_cost_per_token": 0.000002,
+			"max_input_tokens": 128000,
+			"max_output_tokens": 8192,
+			"supported_modalities_input": ["text"],
+			"supported_modalities_output": ["text"]
+		},
+		"doubao-seed-evolving": {
+			"input_cost_per_token": 0.000001,
+			"output_cost_per_token": 0.0000025,
+			"max_input_tokens": 256000,
+			"max_output_tokens": 16384,
+			"supported_modalities_input": ["text", "image"],
+			"supported_modalities_output": ["text"]
+		}
+	}`)
+
+	data, err := svc.parsePricingData(body)
+	require.NoError(t, err)
+
+	// doubao-seed-2.1-turbo
+	p1 := data["doubao-seed-2.1-turbo"]
+	require.NotNil(t, p1)
+	require.Equal(t, int64(128000), p1.ContextLength, "context_length 应从 max_input_tokens 解析")
+	require.Equal(t, int64(8192), p1.MaxOutput, "max_output 应从 max_output_tokens 解析")
+	require.Equal(t, []string{"text"}, p1.ModalitiesInput)
+	require.Equal(t, []string{"text"}, p1.ModalitiesOutput)
+
+	// doubao-seed-evolving：多模态 input
+	p2 := data["doubao-seed-evolving"]
+	require.NotNil(t, p2)
+	require.Equal(t, int64(256000), p2.ContextLength)
+	require.Equal(t, int64(16384), p2.MaxOutput)
+	require.Equal(t, []string{"text", "image"}, p2.ModalitiesInput)
+	require.Equal(t, []string{"text"}, p2.ModalitiesOutput)
+
+	// 复制应独立：parsePricingData 处理多 entry 时不能让两个 entry 的
+	// ModalitiesInput 共享同一 backing array（json.Unmarshal 虽然通常分配
+	// 新 slice，但显式拷贝可防止未来 json 优化/共享 buffer 时污染）。
+	p2.ModalitiesInput[0] = "MUTATED"
+	require.Equal(t, "text", data["doubao-seed-2.1-turbo"].ModalitiesInput[0],
+		"修改 doubao-seed-evolving 不应污染 doubao-seed-2.1-turbo（独立 backing array）")
+	// 自己污染自己 map 的同条目属于 Go 指针语义，不测
+}
+
+// TestParsePricingData_MetadataOptional 验证价格字段存在但无元数据时不报错也不写入零值。
+// 部分 LiteLLM 条目可能只携带价格不携带 max_*_tokens 字段。
+func TestParsePricingData_MetadataOptional(t *testing.T) {
+	svc := &PricingService{}
+	body := []byte(`{
+		"gpt-image-2": {
+			"output_cost_per_image": 0.04,
+			"litellm_provider": "openai"
+		}
+	}`)
+	data, err := svc.parsePricingData(body)
+	require.NoError(t, err)
+	p := data["gpt-image-2"]
+	require.NotNil(t, p)
+	require.Equal(t, int64(0), p.ContextLength, "无 max_input_tokens 时 context_length 应为 0")
+	require.Equal(t, int64(0), p.MaxOutput)
+	require.Nil(t, p.ModalitiesInput)
+	require.Nil(t, p.ModalitiesOutput)
+}
+
+// TestGetModelMetadata_FallbackToFallbackJSON 主场景：models.dev miss → pricingData fallback 命中。
+// 这是豆包系模型参数/模态显示的修复路径。
+func TestGetModelMetadata_FallbackToFallbackJSON(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"doubao-seed-2.1-turbo": {
+				InputCostPerToken:  0.0000008,
+				OutputCostPerToken: 0.000002,
+				ContextLength:      128000,
+				MaxOutput:          8192,
+				ModalitiesInput:    []string{"text"},
+				ModalitiesOutput:   []string{"text"},
+			},
+			"doubao-seed-evolving": {
+				InputCostPerToken:  0.000001,
+				OutputCostPerToken: 0.0000025,
+				ContextLength:      256000,
+				MaxOutput:          16384,
+				ModalitiesInput:    []string{"text", "image"},
+				ModalitiesOutput:   []string{"text"},
+			},
+		},
+	}
+	// modelsDev 留 nil：模拟「上游完全没收录」场景
+
+	ctx, maxOut, mods := svc.GetModelMetadata("doubao-seed-2.1-turbo")
+	require.Equal(t, int64(128000), ctx)
+	require.Equal(t, int64(8192), maxOut)
+	require.Equal(t, []string{"text"}, mods)
+
+	ctx2, maxOut2, mods2 := svc.GetModelMetadata("doubao-seed-evolving")
+	require.Equal(t, int64(256000), ctx2)
+	require.Equal(t, int64(16384), maxOut2)
+	// 多模态 input：去重 + 保序
+	require.Equal(t, []string{"text", "image"}, mods2,
+		"modalities 应去重并保持 input→output 顺序")
+}
+
+// TestGetModelMetadata_BranchCandidateFallback 验证分支模型剥离回退：
+// 查询 doubao-seed-2-1-turbo（连字符版本）时，branchModelCandidates 会归一化
+// 为 doubao-seed-2.1-turbo 命中 pricingData。
+func TestGetModelMetadata_BranchCandidateFallback(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"doubao-seed-2.1-turbo": {
+				ContextLength:   128000,
+				MaxOutput:       8192,
+				ModalitiesInput: []string{"text"},
+			},
+		},
+	}
+
+	ctx, maxOut, _ := svc.GetModelMetadata("doubao-seed-2-1-turbo")
+	require.Equal(t, int64(128000), ctx, "分支剥离应将 doubao-seed-2-1-turbo 归一为 doubao-seed-2.1-turbo")
+	require.Equal(t, int64(8192), maxOut)
+}
+
+// TestGetModelMetadata_ModelsDevPriorityWins 验证 models.dev 命中时不再走 fallback。
+// 即使 pricingData 有同名条目，models.dev 的元数据应优先（语义：主数据源）。
+func TestGetModelMetadata_ModelsDevPriorityWins(t *testing.T) {
+	devClient := NewModelsDevClient("https://example.invalid/api.json")
+	devClient.data["gpt-5.6"] = ModelsDevModel{
+		ID: "gpt-5.6",
+		Limit: struct {
+			Context int64 `json:"context"`
+			Output  int64 `json:"output"`
+		}{Context: 100000, Output: 5000},
+		Modalities: struct {
+			Input  []string `json:"input"`
+			Output []string `json:"output"`
+		}{Input: []string{"text"}, Output: []string{"text"}},
+	}
+
+	svc := &PricingService{
+		modelsDev: devClient,
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.6": {
+				// fallback 值与 models.dev 不同：验证优先级
+				ContextLength:   999999,
+				MaxOutput:       88888,
+				ModalitiesInput: []string{"text", "image"},
+			},
+		},
+	}
+
+	ctx, maxOut, mods := svc.GetModelMetadata("gpt-5.6")
+	require.Equal(t, int64(100000), ctx, "models.dev 命中时 fallback 不应覆盖")
+	require.Equal(t, int64(5000), maxOut)
+	require.Equal(t, []string{"text"}, mods,
+		"models.dev modalities 优先于 pricingData")
+}
+
+// TestGetModelMetadata_NoDataReturnsZero 验证完全无数据时返零值（前端表现为不显示元数据行）。
+func TestGetModelMetadata_NoDataReturnsZero(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			// 只有价格无元数据
+			"some-other-model": {InputCostPerToken: 0.001},
+		},
+	}
+	ctx, maxOut, mods := svc.GetModelMetadata("totally-unknown-model")
+	require.Equal(t, int64(0), ctx)
+	require.Equal(t, int64(0), maxOut)
+	require.Nil(t, mods)
+}
+
+// TestGetModelMetadata_NilSafe 验证 nil service / 空模型名守卫。
+func TestGetModelMetadata_NilSafe(t *testing.T) {
+	var svc *PricingService
+	ctx, maxOut, mods := svc.GetModelMetadata("any-model")
+	require.Equal(t, int64(0), ctx)
+	require.Equal(t, int64(0), maxOut)
+	require.Nil(t, mods)
+
+	svc = &PricingService{}
+	ctx2, maxOut2, mods2 := svc.GetModelMetadata("")
+	require.Equal(t, int64(0), ctx2)
+	require.Equal(t, int64(0), maxOut2)
+	require.Nil(t, mods2)
+}
+
+// TestGetModelMetadata_PartialFallbackFields 验证 fallback JSON 只携带部分元数据时的优雅降级。
+func TestGetModelMetadata_PartialFallbackFields(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			// 只有 context_length，没有 modalities
+			"legacy-model-a": {
+				ContextLength: 32000,
+			},
+			// 只有 modalities，没有 max_output
+			"legacy-model-b": {
+				ContextLength:   64000,
+				ModalitiesInput: []string{"text"},
+			},
+		},
+	}
+
+	ctx, maxOut, mods := svc.GetModelMetadata("legacy-model-a")
+	require.Equal(t, int64(32000), ctx)
+	require.Equal(t, int64(0), maxOut, "无 max_output_tokens 时应返 0")
+	require.Nil(t, mods, "无 modalities 时应返 nil")
+
+	ctx2, maxOut2, mods2 := svc.GetModelMetadata("legacy-model-b")
+	require.Equal(t, int64(64000), ctx2)
+	require.Equal(t, int64(0), maxOut2)
+	require.Equal(t, []string{"text"}, mods2)
+}
+
+// TestMergeModalities 单元测试：去重 + 去空 + 保序 + 全部为空返 nil。
+func TestMergeModalities(t *testing.T) {
+	t.Run("both empty returns nil", func(t *testing.T) {
+		require.Nil(t, mergeModalities(nil, nil))
+		require.Nil(t, mergeModalities([]string{}, []string{}))
+	})
+	t.Run("dedupes across input and output", func(t *testing.T) {
+		// text 同时出现在 input 和 output：只保留一次
+		got := mergeModalities([]string{"text", "image"}, []string{"text"})
+		require.Equal(t, []string{"text", "image"}, got)
+	})
+	t.Run("skips empty strings", func(t *testing.T) {
+		got := mergeModalities([]string{"", "text"}, []string{"image", ""})
+		require.Equal(t, []string{"text", "image"}, got)
+	})
+	t.Run("preserves order", func(t *testing.T) {
+		got := mergeModalities([]string{"image", "text"}, []string{"audio", "image"})
+		require.Equal(t, []string{"image", "text", "audio"}, got)
+	})
+}

@@ -163,6 +163,16 @@ type LiteLLMModelPricing struct {
 	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
 	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
 
+	// 模型元数据（context_length / max_output / modalities），
+	// 2026-08-21 新增：fallback JSON 携带的元数据可作为 models.dev 未收录模型的兜底。
+	// JSON tag 采用 LiteLLM 标准字段名（max_input_tokens / max_output_tokens），
+	// 与上游 model_prices_and_context_window.json 完全兼容。
+	// Modalities 字段名沿用 OpenRouter/LiteLLM 风格的 supported_modalities_*。
+	ContextLength       int64    `json:"max_input_tokens,omitempty"`  // 上下文长度（LiteLLM: max_input_tokens）
+	MaxOutput           int64    `json:"max_output_tokens,omitempty"` // 最大输出 token 数（LiteLLM: max_output_tokens）
+	ModalitiesInput     []string `json:"supported_modalities_input,omitempty"`
+	ModalitiesOutput    []string `json:"supported_modalities_output,omitempty"`
+
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
 	// 否则 token 流量会被按 $0 计费。零值（false）表示条目具备 token 价格。
@@ -201,6 +211,15 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImage                  *float64 `json:"output_cost_per_image"`
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
+
+	// 模型元数据原始字段（fallback JSON 解析用，2026-08-21 新增）。
+	// 与 LiteLLM 上游 model_prices_and_context_window.json 字段名完全对齐：
+	// max_input_tokens / max_output_tokens / supported_modalities_input / supported_modalities_output。
+	MaxInputTokens              *int64    `json:"max_input_tokens"`
+	MaxOutputTokens             *int64    `json:"max_output_tokens"`
+	SupportedModalitiesInput    []string  `json:"supported_modalities_input"`
+	SupportedModalitiesOutput   []string  `json:"supported_modalities_output"`
+
 	// PriceLocked 强制锁定官方价标记（fallback JSON "locked": true，2026-08-21 追加）
 	PriceLocked *bool `json:"locked"`
 }
@@ -587,6 +606,21 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
 		}
 
+		// 模型元数据 fallback 字段（2026-08-21 新增，GetModelMetadata 在 models.dev
+		// miss 时回退到此处填充 context_length / max_output / modalities）。
+		if entry.MaxInputTokens != nil {
+			pricing.ContextLength = *entry.MaxInputTokens
+		}
+		if entry.MaxOutputTokens != nil {
+			pricing.MaxOutput = *entry.MaxOutputTokens
+		}
+		if len(entry.SupportedModalitiesInput) > 0 {
+			pricing.ModalitiesInput = append([]string(nil), entry.SupportedModalitiesInput...)
+		}
+		if len(entry.SupportedModalitiesOutput) > 0 {
+			pricing.ModalitiesOutput = append([]string(nil), entry.SupportedModalitiesOutput...)
+		}
+
 		result[modelName] = pricing
 	}
 
@@ -918,30 +952,65 @@ func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []s
 }
 
 // GetModelMetadata 查询模型元数据（context_length / max_output / modalities），供模型广场展示。
-// 数据源：models.dev。精确未命中时走分支模型引导（gpt-5.6-terra-openai-compact ->
-// gpt-5.6-terra，复制原模型参数/模态）。返回零值表示无元数据。
+// 数据源优先级（2026-08-21 加 fallback 回退）：
+//  1. models.dev 精确匹配（原始模型名）
+//  2. models.dev 分支模型引导（gpt-5.6-terra-openai-compact -> gpt-5.6-terra）
+//  3. pricingData fallback（LiteLLM 上游 fallback JSON 携带的 max_input_tokens /
+//     max_output_tokens / supported_modalities_*，覆盖 models.dev 未收录的模型如豆包系）
+//
+// 返回零值表示完全无元数据。所有字段为空时 modalities 返 nil（前端不渲染模态图标）。
 func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, maxOutput int64, modalities []string) {
-	if s == nil || s.modelsDev == nil || modelName == "" {
+	if s == nil || modelName == "" {
 		return 0, 0, nil
 	}
-	m, ok := s.modelsDev.Lookup(modelName)
-	if !ok {
-		// 分支模型引导：gpt-5.6-terra-openai-compact -> gpt-5.6-terra -> gpt-5.6
+
+	// 1+2. models.dev 精确 + 分支引导
+	if s.modelsDev != nil {
+		if m, ok := s.modelsDev.Lookup(modelName); ok {
+			return extractModelsDevMetadata(m)
+		}
 		if main, ok2 := resolveBranchToMainModel(branchModelCandidates(modelName),
 			func(c string) bool {
 				_, ok3 := s.modelsDev.Lookup(c)
 				return ok3
 			}); ok2 {
-			m, ok = s.modelsDev.Lookup(main)
+			if m, ok3 := s.modelsDev.Lookup(main); ok3 {
+				return extractModelsDevMetadata(m)
+			}
 		}
 	}
-	if !ok {
-		return 0, 0, nil
+
+	// 3. fallback：查询 pricingData（LiteLLM 上游 fallback JSON 携带的元数据）。
+	// 涵盖 doubao-seed-2.1-turbo / doubao-seed-evolving 等 models.dev 完全未收录的模型。
+	if len(s.pricingData) > 0 {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		if entry := s.lookupMetadataFallback(modelName); entry != nil {
+			return entry.ContextLength, entry.MaxOutput, mergeModalities(entry.ModalitiesInput, entry.ModalitiesOutput)
+		}
 	}
+
+	return 0, 0, nil
+}
+
+// extractModelsDevMetadata 从 models.dev 模型条目提取 (context, max_output, modalities) 元组。
+// 内部抽出来便于 GetModelMetadata 与未来其他复用点。
+func extractModelsDevMetadata(m ModelsDevModel) (contextLen int64, maxOutput int64, modalities []string) {
 	contextLen = m.Limit.Context
 	maxOutput = m.Limit.Output
-	seen := make(map[string]struct{})
-	for _, mods := range [][]string{m.Modalities.Input, m.Modalities.Output} {
+	modalities = mergeModalities(m.Modalities.Input, m.Modalities.Output)
+	return contextLen, maxOutput, modalities
+}
+
+// mergeModalities 合并 input/output 模态列表，去重 + 去空 + 保序。
+// 暴露供 extractModelsDevMetadata 和 lookupMetadataFallback 复用。
+func mergeModalities(input, output []string) []string {
+	if len(input) == 0 && len(output) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(input)+len(output))
+	modalities := make([]string, 0, len(input)+len(output))
+	for _, mods := range [][]string{input, output} {
 		for _, mod := range mods {
 			if mod == "" {
 				continue
@@ -953,7 +1022,31 @@ func (s *PricingService) GetModelMetadata(modelName string) (contextLen int64, m
 			modalities = append(modalities, mod)
 		}
 	}
-	return contextLen, maxOutput, modalities
+	if len(modalities) == 0 {
+		return nil
+	}
+	return modalities
+}
+
+// lookupMetadataFallback 在 pricingData map 中按模型名查找 fallback 元数据。
+// 复用 GetModelPricing 的回退链策略：精确 → 分支剥离 → 常见连字符变体。
+// 调用方必须已持有 s.mu 的读锁（读 pricingData 需要）。
+func (s *PricingService) lookupMetadataFallback(modelName string) *LiteLLMModelPricing {
+	// 1. 精确匹配
+	if entry, ok := s.pricingData[modelName]; ok && entry != nil {
+		return entry
+	}
+
+	// 2. 分支模型剥离（gpt-5.6-terra-openai-compact -> gpt-5.6-terra -> gpt-5.6）
+	//    只剥离到命中为止，不复制 GetModelPricing 的 fuzzy/family/openai 链（保持
+	//    fallback 元数据回退的语义最小化：模型名精确相关才信任元数据）。
+	for _, candidate := range branchModelCandidates(modelName) {
+		if entry, ok := s.pricingData[candidate]; ok && entry != nil {
+			return entry
+		}
+	}
+
+	return nil
 }
 
 // branchAliasMap 已知裸名/别名 → 主模型映射（models.dev 未收录裸名的场景，
