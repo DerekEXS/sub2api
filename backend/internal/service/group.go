@@ -383,9 +383,12 @@ func modelMatchesAny(patterns []string, model string) bool {
 //   - 无多窗口时校验 legacy 单窗口：start/end 必填且合法（end>start，不支持跨天），multiplier>=0；
 //   - multiplier=0 是允许的，表示高峰 token 请求按 0 倍计费，可用于折扣/免费策略；
 //   - enabled=false 时放行（不关心类型与内容）。
-func ValidatePeakRateConfig(enabled bool, start, end string, multiplier float64, windows []PeakWindow) error {
+func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64, windows []PeakWindow) error {
 	if !enabled {
 		return nil
+	}
+	if subscriptionType != SubscriptionTypeSubscription {
+		return errors.New("高峰时段倍率仅支持订阅类型分组")
 	}
 	if len(windows) > 0 {
 		return ValidatePeakWindows(windows)
@@ -460,13 +463,18 @@ func ValidatePeakWindows(windows []PeakWindow) error {
 }
 
 // NormalizePeakRateConfig 归一化最终落库的单窗口高峰配置，CreateGroup 与 UpdateGroup 两条写路径共用（唯一收口）：
-//   - 订阅类型限制已放开：standard 分组可携带高峰配置；
+//   - 非订阅类型分组不携带任何高峰配置，一律清空（enabled=false、窗口置空、倍率归 1.0）；
+//     订阅类型限制已放开：standard 分组可携带高峰配置（上游 v0.1.179 语义）；
 //   - 关闭高峰时保留已配置的合法窗口（便于临时停用后再启用），
 //     但清掉无法解析的脏字符串与负倍率，避免脏数据入库。
 //
 // 与 ValidatePeakRateConfig 的分工：enabled=true 时校验已保证各字段合法，本函数为无操作；
-// enabled=false 时校验放行，由本函数兜底清洗。调用顺序为先归一化、后校验。
-func NormalizePeakRateConfig(enabled bool, start, end string, multiplier float64) (bool, string, string, float64) {
+// enabled=false 时校验放行，由本函数兜底清洗。调用顺序为先归一化、后校验，
+// 使"订阅转标准"这类更新能静默清空高峰配置而不是被校验拒绝。
+func NormalizePeakRateConfig(subscriptionType string, enabled bool, start, end string, multiplier float64) (bool, string, string, float64) {
+	if subscriptionType != SubscriptionTypeSubscription {
+		return false, "", "", 1.0
+	}
 	if !enabled {
 		if _, ok := parseMinutes(start); !ok {
 			start = ""

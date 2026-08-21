@@ -127,7 +127,7 @@ func TestValidatePeakRateConfig(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := ValidatePeakRateConfig(c.enabled, c.start, c.end, c.mult, nil)
+			err := ValidatePeakRateConfig(SubscriptionTypeSubscription, c.enabled, c.start, c.end, c.mult, nil)
 			if c.wantErr && err == nil {
 				t.Fatalf("expect error, got nil")
 			}
@@ -146,7 +146,7 @@ func TestValidatePeakRateConfig_MultiWindow(t *testing.T) {
 		{Start: "14:00", End: "18:00", Multiplier: 2.0},
 	}
 	t.Run("standard group with windows passes", func(t *testing.T) {
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, deepseekWindows); err != nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, deepseekWindows); err != nil {
 			t.Fatalf("expect no error, got %v", err)
 		}
 	})
@@ -155,7 +155,7 @@ func TestValidatePeakRateConfig_MultiWindow(t *testing.T) {
 			{Start: "09:00", End: "12:00", Multiplier: 2.0},
 			{Start: "12:00", End: "14:00", Multiplier: 1.5},
 		}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err != nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err != nil {
 			t.Fatalf("adjacent [09:00,12:00)+[12:00,14:00) must pass, got %v", err)
 		}
 	})
@@ -164,7 +164,7 @@ func TestValidatePeakRateConfig_MultiWindow(t *testing.T) {
 			{Start: "09:00", End: "12:00", Multiplier: 2.0},
 			{Start: "11:00", End: "14:00", Multiplier: 2.0},
 		}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("overlapping windows must be rejected")
 		}
 	})
@@ -173,37 +173,37 @@ func TestValidatePeakRateConfig_MultiWindow(t *testing.T) {
 			{Start: "09:00", End: "12:00", Multiplier: 2.0},
 			{Start: "09:00", End: "12:00", Multiplier: 3.0},
 		}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("duplicate windows must be rejected")
 		}
 	})
 	t.Run("malformed window start rejected", func(t *testing.T) {
 		windows := []PeakWindow{{Start: "9:xx", End: "12:00", Multiplier: 2.0}}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("malformed start must be rejected")
 		}
 	})
 	t.Run("cross-day window rejected", func(t *testing.T) {
 		windows := []PeakWindow{{Start: "22:00", End: "02:00", Multiplier: 2.0}}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("cross-day window must be rejected")
 		}
 	})
 	t.Run("negative multiplier rejected", func(t *testing.T) {
 		windows := []PeakWindow{{Start: "09:00", End: "12:00", Multiplier: -1.0}}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("negative multiplier must be rejected")
 		}
 	})
 	t.Run("empty model entry rejected", func(t *testing.T) {
 		windows := []PeakWindow{{Start: "09:00", End: "12:00", Multiplier: 2.0, Models: []string{""}}}
-		if err := ValidatePeakRateConfig(true, "", "", 1.0, windows); err == nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, true, "", "", 1.0, windows); err == nil {
 			t.Fatalf("empty model entry must be rejected")
 		}
 	})
 	t.Run("disabled with bad windows passes", func(t *testing.T) {
 		windows := []PeakWindow{{Start: "99:99", End: "12:00", Multiplier: 2.0}}
-		if err := ValidatePeakRateConfig(false, "", "", 1.0, windows); err != nil {
+		if err := ValidatePeakRateConfig(SubscriptionTypeSubscription, false, "", "", 1.0, windows); err != nil {
 			t.Fatalf("disabled must pass through, got %v", err)
 		}
 	})
@@ -385,12 +385,12 @@ func TestPeakMultiplierAt_StandardTypeNoLongerDegrades(t *testing.T) {
 // TestNormalizePeakRateConfig_StandardNotCleared 语义变更：NormalizePeakRateConfig
 // 不再对 standard 分组清空高峰配置。
 func TestNormalizePeakRateConfig_StandardNotCleared(t *testing.T) {
-	enabled, start, end, mult := NormalizePeakRateConfig(true, "14:00", "18:00", 3.0)
+	enabled, start, end, mult := NormalizePeakRateConfig(SubscriptionTypeSubscription, true, "14:00", "18:00", 3.0)
 	if !enabled || start != "14:00" || end != "18:00" || mult != 3.0 {
 		t.Fatalf("standard group config must be preserved, got (%v,%q,%q,%v)", enabled, start, end, mult)
 	}
 	// disabled 时仍清洗脏字段
-	enabled, start, end, mult = NormalizePeakRateConfig(false, "bad", "18:00", -1.0)
+	enabled, start, end, mult = NormalizePeakRateConfig(SubscriptionTypeSubscription, false, "bad", "18:00", -1.0)
 	if enabled || start != "" || end != "18:00" || mult != 1.0 {
 		t.Fatalf("disabled dirty cleanup, got (%v,%q,%q,%v)", enabled, start, end, mult)
 	}

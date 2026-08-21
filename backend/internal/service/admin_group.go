@@ -376,9 +376,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	// 先归一化（清洗停用状态下的脏字段）再校验，与 UpdateGroup 同一收口。
 	// 订阅类型限制已放开：standard/subscription 均可配置高峰。
-	peakRateEnabled, peakStart, peakEnd, peakRateMultiplier := NormalizePeakRateConfig(input.PeakRateEnabled, input.PeakStart, input.PeakEnd, peakRateMultiplier)
+	peakRateEnabled, peakStart, peakEnd, peakRateMultiplier := NormalizePeakRateConfig(subscriptionType, input.PeakRateEnabled, input.PeakStart, input.PeakEnd, peakRateMultiplier)
 	peakWindows := NormalizePeakWindows(input.PeakWindows)
-	if err := ValidatePeakRateConfig(peakRateEnabled, peakStart, peakEnd, peakRateMultiplier, peakWindows); err != nil {
+	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier, peakWindows); err != nil {
 		return nil, err
 	}
 
@@ -753,8 +753,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// 先归一化（清洗停用状态下的脏字段）——订阅类型限制已放开，不再按订阅类型清空，
 	// 再收敛校验：Update 可能只传部分 peak 字段，需对合并后的最终配置统一校验，
 	// 防止单独修改 start/end 导致最终 start>=end 等非法配置入库。与 CreateGroup 同一收口。
-	group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier = NormalizePeakRateConfig(group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
-	if err := ValidatePeakRateConfig(group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier, group.PeakWindows); err != nil {
+	group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier = NormalizePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier)
+	if err := ValidatePeakRateConfig(group.SubscriptionType, group.PeakRateEnabled, group.PeakStart, group.PeakEnd, group.PeakRateMultiplier, group.PeakWindows); err != nil {
 		return nil, err
 	}
 	if input.ProfitControlEnabled != nil {

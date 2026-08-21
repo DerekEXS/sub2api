@@ -492,7 +492,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if err := service.ValidatePeakRateConfig(req.PeakRateEnabled, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0), req.PeakWindows); err != nil {
+	if err := service.ValidatePeakRateConfig(req.SubscriptionType, req.PeakRateEnabled, req.PeakStart, req.PeakEnd, float64ValueOrDefault(req.PeakRateMultiplier, 1.0), req.PeakWindows); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
