@@ -484,7 +484,10 @@ func TestAgentServiceV2Status(t *testing.T) {
 	}
 
 	// manager 无记录（实例已销毁）-> not_started 或库内状态
-	mgr := svc.manager.(*mockAgentManagerV2)
+	mgr, ok := svc.manager.(*mockAgentManagerV2)
+	if !ok {
+		t.Fatal("manager is not *mockAgentManagerV2")
+	}
 	mgr.mu.Lock()
 	delete(mgr.states, 3)
 	mgr.mu.Unlock()

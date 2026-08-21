@@ -661,9 +661,10 @@ func calculateCreateOrderPayAmount(limitAmount, feeRate float64, currency string
 
 func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, currency, orderType string, usdToCnyRate float64, fxRate float64, settlementCurrency string) (string, float64, error) {
 	paymentAmount := limitAmount
-	if orderType == payment.OrderTypeSubscription {
+	switch orderType {
+	case payment.OrderTypeSubscription:
 		paymentAmount = calculateSubscriptionGatewayBaseAmount(limitAmount, usdToCnyRate, currency)
-	} else if orderType == payment.OrderTypeBalance {
+	case payment.OrderTypeBalance:
 		// v4.6.2: 余额充值走"结算货币 → 充值货币"换算（主人规范）：
 		// 页面输入/到账是结算货币（如 USD），提交给渠道的是充值货币（如 CNY）。
 		paymentAmount = calculateBalanceGatewayBaseAmount(limitAmount, fxRate, currency, settlementCurrency)

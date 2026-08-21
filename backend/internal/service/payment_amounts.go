@@ -57,25 +57,6 @@ func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
 		InexactFloat64()
 }
 
-// calculateCreditedBalanceWithConversion 支持跨币种换算的入账计算（v4.6.2）。
-//
-// 参数：
-//   - paymentAmount: 用户实际支付的金额（网关币种，gateCurrency）
-//   - multiplier:    settings.balance_recharge_multiplier（仍然是 USD 计价的入账倍率）
-//   - gateCurrency:  网关/支付渠道实际收款币种（CNY/USD/EUR）
-//   - settlementCurrency: 用户余额的计价币种（CNY/USD/EUR）
-//   - fxRate:        从 gateCurrency 换算到 settlementCurrency 的汇率（1 gateCurrency = fxRate settlementCurrency）
-//
-// 返回：用户到账的 settlementCurrency 余额
-func calculateCreditedBalanceWithConversion(paymentAmount, multiplier float64, gateCurrency, settlementCurrency string, fxRate float64) float64 {
-	m := decimal.NewFromFloat(normalizeBalanceRechargeMultiplier(multiplier))
-	amt := decimal.NewFromFloat(paymentAmount).Mul(m)
-	if gateCurrency != "" && settlementCurrency != "" && gateCurrency != settlementCurrency && fxRate > 0 {
-		amt = amt.Mul(decimal.NewFromFloat(fxRate))
-	}
-	return amt.Round(payment.MaxFractionDigitsOrDefault(settlementCurrency, 2)).InexactFloat64()
-}
-
 func calculateGatewayRefundAmount(orderAmount, payAmount, refundAmount float64, currency string) float64 {
 	if orderAmount <= 0 || payAmount <= 0 || refundAmount <= 0 {
 		return 0

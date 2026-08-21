@@ -91,7 +91,7 @@ func (c *ModelsDevClient) Sync(ctx context.Context) error {
 		c.mu.Unlock()
 		return fmt.Errorf("modelsdev: fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		c.mu.Lock()
 		c.lastSyncErr = fmt.Sprintf("status %d", resp.StatusCode)

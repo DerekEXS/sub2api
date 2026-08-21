@@ -35,10 +35,6 @@ import (
 // 单测用 mock/fake 覆盖（201/202/200/404/manager 500/archive 流式）。
 // ──────────────────────────────────────────────────────────────
 
-// defaultAgentModel 是注入容器的默认模型。容器 base_url 指向云间API网关
-// （AGENT_MODEL_BASE_URL），用户专属 key 绑定的分组需包含该模型。
-const defaultAgentModel = "deepseek-v4-flash"
-
 // managerCreateTimeout 是 manager Create 的独立超时：容器创建（docker run +
 // launcher 初始化）是同步慢操作，需大于前端 axios 30s 超时，让服务端在客户端
 // 断开后仍能完成创建并把状态落库（#320 Network error 根因修复）。
@@ -51,14 +47,14 @@ type AgentV2State struct {
 	Port               int    `json:"port,omitempty"`
 	AccessHost         string `json:"access_host,omitempty"`
 	AccessPassword     string `json:"access_password,omitempty"`
-	IdleDeadline       int64  `json:"idle_deadline,omitempty"`       // unix 秒
-	RetainDeadline     int64  `json:"retain_deadline,omitempty"`     // unix 秒
-	HardcapDeadline    int64  `json:"hardcap_deadline,omitempty"`    // unix 秒
-	Position           int    `json:"position,omitempty"`            // queued 时的排队位置
+	IdleDeadline       int64  `json:"idle_deadline,omitempty"`        // unix 秒
+	RetainDeadline     int64  `json:"retain_deadline,omitempty"`      // unix 秒
+	HardcapDeadline    int64  `json:"hardcap_deadline,omitempty"`     // unix 秒
+	Position           int    `json:"position,omitempty"`             // queued 时的排队位置
 	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
 	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
-	RetainHours        int    `json:"retain_hours,omitempty"`        // 前端动态文案（小时，保留期）#issue2/3
-	HardcapHours       int    `json:"hardcap_hours,omitempty"`       // 前端动态文案（小时，硬顶）#issue2/3
+	RetainHours        int    `json:"retain_hours,omitempty"`         // 前端动态文案（小时，保留期）#issue2/3
+	HardcapHours       int    `json:"hardcap_hours,omitempty"`        // 前端动态文案（小时，硬顶）#issue2/3
 }
 
 // AgentPoolStats 是 manager 池统计。
@@ -92,6 +88,7 @@ type AgentAdminListResponse struct {
 // 双轨语义（主人 2026-08-16 规范）：
 //   - RetainHours 保留期：每次启动刷新重计时（manager last_started_at），关停后归档保留时长
 //   - HardcapHours 硬顶：从首次激活（first_activated_at）起算，永不清零，到期强制销毁+清数据
+//
 // 旧键 data_retention_hours 由 manager 侧读入时映射为 hardcap_hours（向后兼容）。
 type AgentConfig struct {
 	RetainHours        int `json:"retain_hours"`
@@ -103,9 +100,9 @@ type AgentConfig struct {
 
 // AgentUserConfigResponse 是每用户配置响应（全局 + 覆盖 + 生效值）。
 type AgentUserConfigResponse struct {
-	Global    AgentConfig         `json:"global"`
-	Overrides map[string]int      `json:"overrides"`
-	Effective AgentConfig         `json:"effective"`
+	Global    AgentConfig    `json:"global"`
+	Overrides map[string]int `json:"overrides"`
+	Effective AgentConfig    `json:"effective"`
 }
 
 // AgentManagerInterface 抽象 NY agent-manager daemon 的 /v2 API（可 mock）。
@@ -270,7 +267,7 @@ func (c *httpAgentManagerClient) Create(ctx context.Context, userID int64, apiKe
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// archive 之外的 /v2 API 全部返回 JSON
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -295,7 +292,7 @@ func (c *httpAgentManagerClient) Get(ctx context.Context, userID int64) (*AgentV
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil // 无实例
 	}
@@ -318,7 +315,7 @@ func (c *httpAgentManagerClient) Delete(ctx context.Context, userID int64) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return nil // 幂等：无实例 = 成功
 	}
@@ -337,7 +334,7 @@ func (c *httpAgentManagerClient) List(ctx context.Context) (*AgentListResponse, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -418,7 +415,7 @@ func (c *httpAgentManagerClient) doJSONGet(ctx context.Context, path string) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -435,7 +432,7 @@ func (c *httpAgentManagerClient) doJSONReq(ctx context.Context, method, path str
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -452,11 +449,11 @@ func (c *httpAgentManagerClient) Archive(ctx context.Context, userID int64) (io.
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, errors.New("agent archive not found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("agent-manager archive: http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
@@ -627,8 +624,8 @@ type AgentState struct {
 	Position           int    `json:"position,omitempty"`
 	IdleTimeoutMinutes int    `json:"idle_timeout_minutes,omitempty"` // 前端动态文案（分钟）
 	DataRetentionHours int    `json:"data_retention_hours,omitempty"` // 前端动态文案（小时）
-	RetainHours        int    `json:"retain_hours,omitempty"`        // 前端动态文案（小时，保留期）#issue2/3
-	HardcapHours       int    `json:"hardcap_hours,omitempty"`       // 前端动态文案（小时，硬顶）#issue2/3
+	RetainHours        int    `json:"retain_hours,omitempty"`         // 前端动态文案（小时，保留期）#issue2/3
+	HardcapHours       int    `json:"hardcap_hours,omitempty"`        // 前端动态文案（小时，硬顶）#issue2/3
 	CreatedAt          string `json:"created_at,omitempty"`
 }
 

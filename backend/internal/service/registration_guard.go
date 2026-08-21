@@ -37,18 +37,18 @@ const regAuditConfigKey = "regaudit:config"
 // 全部评分/阈值参数可配置，持久化在 Redis hash `regaudit:config`；
 // 无 Redis（未注入）时使用 DefaultRegAuditConfig 硬编码默认值。
 type RegAuditConfig struct {
-	UaCheckEnabled      bool    `json:"ua_check_enabled"`        // L0 UA 硬规则开关
-	CGNATExempt         bool    `json:"cgnat_exempt"`            // CGNAT IP 计数豁免开关
-	FlagThreshold       int     `json:"flag_threshold"`          // 打标阈值（>= 打标）
-	StrongThreshold     int     `json:"strong_threshold"`        // 强标阈值（>= 强标）
-	EmailLongLocalMin   int     `json:"email_long_local_min"`    // 邮箱本地部分长度下限（随机串特征）
-	EmailVowelRatioMax  float64 `json:"email_vowel_ratio_max"`   // 邮箱元音占比上限（随机串特征）
-	ScoreEmailRandom    int     `json:"score_email_random"`      // 邮箱随机串形态分
-	ScoreEmailAlias     int     `json:"score_email_alias"`       // 邮箱 + 别名分
-	ScoreEmailWhitelist int     `json:"score_email_whitelist"`   // 白名单域名分（负值=减分）
-	ScoreRhythm         int     `json:"score_rhythm"`            // 10m 节奏分（同 IP >=2 次）
-	Score24h45          int     `json:"score_24h_4_5"`           // 24h 分档 4-5 次
-	Score24h6Plus       int     `json:"score_24h_6_plus"`        // 24h 分档 >=6 次
+	UaCheckEnabled      bool    `json:"ua_check_enabled"`      // L0 UA 硬规则开关
+	CGNATExempt         bool    `json:"cgnat_exempt"`          // CGNAT IP 计数豁免开关
+	FlagThreshold       int     `json:"flag_threshold"`        // 打标阈值（>= 打标）
+	StrongThreshold     int     `json:"strong_threshold"`      // 强标阈值（>= 强标）
+	EmailLongLocalMin   int     `json:"email_long_local_min"`  // 邮箱本地部分长度下限（随机串特征）
+	EmailVowelRatioMax  float64 `json:"email_vowel_ratio_max"` // 邮箱元音占比上限（随机串特征）
+	ScoreEmailRandom    int     `json:"score_email_random"`    // 邮箱随机串形态分
+	ScoreEmailAlias     int     `json:"score_email_alias"`     // 邮箱 + 别名分
+	ScoreEmailWhitelist int     `json:"score_email_whitelist"` // 白名单域名分（负值=减分）
+	ScoreRhythm         int     `json:"score_rhythm"`          // 10m 节奏分（同 IP >=2 次）
+	Score24h45          int     `json:"score_24h_4_5"`         // 24h 分档 4-5 次
+	Score24h6Plus       int     `json:"score_24h_6_plus"`      // 24h 分档 >=6 次
 }
 
 // DefaultRegAuditConfig 返回硬编码默认值（与 Redis 是否可用无关）。
@@ -300,18 +300,18 @@ func applyRegAuditFields(cfg *RegAuditConfig, fields map[string]string) {
 // regAuditFields 把配置序列化为 Redis hash 字符串字段（全量写，读时按需解析）。
 func regAuditFields(cfg RegAuditConfig) map[string]any {
 	return map[string]any{
-		"ua_check_enabled":       boolStr(cfg.UaCheckEnabled),
-		"cgnat_exempt":           boolStr(cfg.CGNATExempt),
-		"flag_threshold":         strconv.Itoa(cfg.FlagThreshold),
-		"strong_threshold":       strconv.Itoa(cfg.StrongThreshold),
-		"email_long_local_min":   strconv.Itoa(cfg.EmailLongLocalMin),
-		"email_vowel_ratio_max":  strconv.FormatFloat(cfg.EmailVowelRatioMax, 'f', -1, 64),
-		"score_email_random":     strconv.Itoa(cfg.ScoreEmailRandom),
-		"score_email_alias":      strconv.Itoa(cfg.ScoreEmailAlias),
-		"score_email_whitelist":  strconv.Itoa(cfg.ScoreEmailWhitelist),
-		"score_rhythm":           strconv.Itoa(cfg.ScoreRhythm),
-		"score_24h_4_5":          strconv.Itoa(cfg.Score24h45),
-		"score_24h_6_plus":       strconv.Itoa(cfg.Score24h6Plus),
+		"ua_check_enabled":      boolStr(cfg.UaCheckEnabled),
+		"cgnat_exempt":          boolStr(cfg.CGNATExempt),
+		"flag_threshold":        strconv.Itoa(cfg.FlagThreshold),
+		"strong_threshold":      strconv.Itoa(cfg.StrongThreshold),
+		"email_long_local_min":  strconv.Itoa(cfg.EmailLongLocalMin),
+		"email_vowel_ratio_max": strconv.FormatFloat(cfg.EmailVowelRatioMax, 'f', -1, 64),
+		"score_email_random":    strconv.Itoa(cfg.ScoreEmailRandom),
+		"score_email_alias":     strconv.Itoa(cfg.ScoreEmailAlias),
+		"score_email_whitelist": strconv.Itoa(cfg.ScoreEmailWhitelist),
+		"score_rhythm":          strconv.Itoa(cfg.ScoreRhythm),
+		"score_24h_4_5":         strconv.Itoa(cfg.Score24h45),
+		"score_24h_6_plus":      strconv.Itoa(cfg.Score24h6Plus),
 	}
 }
 

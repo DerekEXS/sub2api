@@ -152,7 +152,11 @@ func resolveAgentUISession(c *gin.Context, userService *service.UserService, sid
 	if !ok {
 		return false
 	}
-	es := entry.(agentUISession)
+	es, ok := entry.(agentUISession)
+	if !ok {
+		agentUISessions.Delete(sid)
+		return false
+	}
 	if time.Now().Unix() > es.exp {
 		agentUISessions.Delete(sid)
 		return false
