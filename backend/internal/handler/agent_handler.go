@@ -93,7 +93,7 @@ func (h *AgentHandler) Archive(c *gin.Context) {
 // UI GET /api/v1/agent/ui + /api/v1/agent/ui/*path — 用户实例 Web UI 反向代理。
 //
 // 目标 = AGENT_UI_VHOST_URL（manager vhost 入口，如 http://127.0.0.1:28801），
-// Host 头改写为 agent-<userID>.agent.cloudzone-api.cyou（vhost 按 Host 路由到实例端口），
+// Host 头改写为 agent-<userID>.<AGENT_UI_VHOST_BASE>（vhost 按 Host 路由到实例端口），
 // 原路径原样透传。WebSocket（如实例内终端）由 httputil.ReverseProxy 天然透传 Upgrade。
 // 未配置 AGENT_UI_VHOST_URL 时返回 503 明确错误（不静默 404）。
 func (h *AgentHandler) UI(c *gin.Context) {
@@ -117,6 +117,14 @@ func (h *AgentHandler) UI(c *gin.Context) {
 		response.InternalError(c, "Invalid agent UI vhost URL")
 		return
 	}
+	// vhost 基域名必须显式配置（生产域名不硬编码，见 AGENT_UI_VHOST_BASE）；
+	// 空 = 未配置，UI 端点返回 503 明确错误（与 AGENT_UI_VHOST_URL 同模式）。
+	vhostBase := strings.TrimSpace(h.cfg.Agent.VHostBase)
+	if vhostBase == "" {
+		response.Error(c, http.StatusServiceUnavailable,
+			"Agent UI vhost base not configured (AGENT_UI_VHOST_BASE)")
+		return
+	}
 
 	// gin 路由 /agent/ui/*path 的 *path 即实例侧原始路径（已剥掉 /api/v1/agent/ui 前缀）
 	upstreamPath := c.Param("path")
@@ -129,8 +137,8 @@ func (h *AgentHandler) UI(c *gin.Context) {
 		req.URL.Host = targetURL.Host
 		req.URL.Path = upstreamPath
 		// Host 头改写为当前用户的实例子域：manager vhost 按
-		// agent-<uid>.agent.cloudzone-api.cyou 分发到该用户实例端口。
-		req.Host = fmt.Sprintf("agent-%d.agent.cloudzone-api.cyou", subject.UserID)
+		// agent-<uid>.<AGENT_UI_VHOST_BASE> 分发到该用户实例端口（VHostBase 已在函数体校验非空）。
+		req.Host = fmt.Sprintf("agent-%d.%s", subject.UserID, vhostBase)
 	}
 	// launcher 根路径 302 到 /launcher-login 等相对路径：重写 Location 头
 	// 回到 /api/v1/agent/ui 前缀，避免浏览器跟随落到 sub2api 自身路由（#325 遗留）。

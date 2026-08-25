@@ -275,6 +275,9 @@ type AgentConfig struct {
 	// UIVHostURL: /api/v1/agent/ui 反向代理目标（manager vhost 入口，如 http://127.0.0.1:28801）。
 	// 空 = 未配置，UI 端点返回 503 明确错误。
 	UIVHostURL string `mapstructure:"ui_vhost_url"` // AGENT_UI_VHOST_URL
+	// VHostBase: 用户实例 Host 头的 vhost 基域名（生产域名经 AGENT_UI_VHOST_BASE 注入）。
+	// 生产域名不硬编码（敏感信息审计 v4.25）；空 = 未配置，Agent UI 端点返回 503。
+	VHostBase string `mapstructure:"vhost_base"` // AGENT_UI_VHOST_BASE
 }
 
 // IsConfigured 检查 Agent 服务必要配置是否齐全
@@ -2269,6 +2272,7 @@ func setDefaults() {
 	viper.SetDefault("agent.model_base_url", "")
 	viper.SetDefault("agent.public_url_base", "")
 	viper.SetDefault("agent.ui_vhost_url", "")
+	viper.SetDefault("agent.vhost_base", "") // AGENT_UI_VHOST_BASE（#108 空默认注册后 AutomaticEnv 才能覆盖）
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)

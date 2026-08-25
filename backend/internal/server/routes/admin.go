@@ -103,7 +103,7 @@ func RegisterAdminRoutes(
 		// TLS 指纹模板管理
 		registerTLSFingerprintProfileRoutes(admin, h)
 
-// Agent 服务管理（实例列表/销毁/归档下载）
+		// Agent 服务管理（实例列表/销毁/归档下载）
 		registerAgentAdminRoutes(admin, h)
 
 		// 注册风险审计（registration-audit）

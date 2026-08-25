@@ -52,8 +52,8 @@ type PlazaGroup struct {
 	PeakEnd            string
 	PeakRateMultiplier float64
 	// PeakWindows 多谷峰时段窗口（fork 维护，2026-08-21）；空时回退到 PeakStart/PeakEnd。
-	PeakWindows  []PeakWindow
-	IsExclusive  bool
+	PeakWindows []PeakWindow
+	IsExclusive bool
 	// 图片按次实付倍率：ImageRateIndependent 为 true 时，图片计费模型的实付
 	// = 档位价 × ImageRateMultiplier，不乘分组/用户专属倍率（与计费口径一致）。
 	ImageRateIndependent bool

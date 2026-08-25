@@ -168,10 +168,10 @@ type LiteLLMModelPricing struct {
 	// JSON tag 采用 LiteLLM 标准字段名（max_input_tokens / max_output_tokens），
 	// 与上游 model_prices_and_context_window.json 完全兼容。
 	// Modalities 字段名沿用 OpenRouter/LiteLLM 风格的 supported_modalities_*。
-	ContextLength       int64    `json:"max_input_tokens,omitempty"`  // 上下文长度（LiteLLM: max_input_tokens）
-	MaxOutput           int64    `json:"max_output_tokens,omitempty"` // 最大输出 token 数（LiteLLM: max_output_tokens）
-	ModalitiesInput     []string `json:"supported_modalities_input,omitempty"`
-	ModalitiesOutput    []string `json:"supported_modalities_output,omitempty"`
+	ContextLength    int64    `json:"max_input_tokens,omitempty"`  // 上下文长度（LiteLLM: max_input_tokens）
+	MaxOutput        int64    `json:"max_output_tokens,omitempty"` // 最大输出 token 数（LiteLLM: max_output_tokens）
+	ModalitiesInput  []string `json:"supported_modalities_input,omitempty"`
+	ModalitiesOutput []string `json:"supported_modalities_output,omitempty"`
 
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
@@ -215,10 +215,10 @@ type LiteLLMRawEntry struct {
 	// 模型元数据原始字段（fallback JSON 解析用，2026-08-21 新增）。
 	// 与 LiteLLM 上游 model_prices_and_context_window.json 字段名完全对齐：
 	// max_input_tokens / max_output_tokens / supported_modalities_input / supported_modalities_output。
-	MaxInputTokens              *int64    `json:"max_input_tokens"`
-	MaxOutputTokens             *int64    `json:"max_output_tokens"`
-	SupportedModalitiesInput    []string  `json:"supported_modalities_input"`
-	SupportedModalitiesOutput   []string  `json:"supported_modalities_output"`
+	MaxInputTokens            *int64   `json:"max_input_tokens"`
+	MaxOutputTokens           *int64   `json:"max_output_tokens"`
+	SupportedModalitiesInput  []string `json:"supported_modalities_input"`
+	SupportedModalitiesOutput []string `json:"supported_modalities_output"`
 
 	// PriceLocked 强制锁定官方价标记（fallback JSON "locked": true，2026-08-21 追加）
 	PriceLocked *bool `json:"locked"`
