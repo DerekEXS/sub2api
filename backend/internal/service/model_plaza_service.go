@@ -20,6 +20,13 @@ type PlazaOfficialPricing struct {
 }
 
 // PlazaModel 模型广场中单个模型条目：按实收口径合成的展示定价 + 官方参考价。
+// modelMeta 模型元数据查询 memo 值（避免同模型跨分组重复走 GetModelMetadata）。
+type modelMeta struct {
+	contextLength int64
+	maxOutput     int64
+	modalities    []string
+}
+
 type PlazaModel struct {
 	Name            string
 	Platform        string
@@ -150,6 +157,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 	}
 	// modelIdx[groupID][platform+modelName] = index into byGroup[groupID].Models
 	modelIdx := make(map[int64]map[modelKey]int, len(groups))
+	// 模型元数据 memo（fork：models.dev + fallback JSON；memo 防同模型跨分组重复查询）
+	metaMemo := make(map[string]modelMeta)
 	for i := range channels {
 		ch := &channels[i]
 		if ch.Status != StatusActive {
@@ -187,10 +196,20 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 					continue
 				}
 				idx[key] = len(pg.Models)
+				// 模型元数据（fork：GetModelMetadata 三级 fallback——models.dev + 分支引导 + pricingData JSON）
+				md, ok := metaMemo[m.Name]
+				if !ok {
+					cl, mo, mods := s.pricingService.GetModelMetadata(m.Name)
+					md = modelMeta{cl, mo, mods}
+					metaMemo[m.Name] = md
+				}
 				pg.Models = append(pg.Models, PlazaModel{
-					Name:     m.Name,
-					Platform: m.Platform,
-					Pricing:  m.Pricing,
+					Name:          m.Name,
+					Platform:      m.Platform,
+					Pricing:       m.Pricing,
+					ContextLength: md.contextLength,
+					MaxOutput:     md.maxOutput,
+					Modalities:    md.modalities,
 				})
 			}
 		}

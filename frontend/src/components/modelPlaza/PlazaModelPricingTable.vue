@@ -109,7 +109,7 @@
             </div>
           </td>
 
-<<!-- 参数列：上=最大输出 下=上下文（fork 新增，models.dev） -->
+<!-- 参数列：上=最大输出 下=上下文（fork 新增，models.dev） -->
           <td
             class="border-r border-gray-100 px-3 py-2.5 align-middle dark:border-dark-700/60"
           >
@@ -298,7 +298,7 @@
             </div>
             <span v-else class="text-gray-400 dark:text-dark-500">-</span>
           </td>
-<<!-- 折扣倍率(分时时段行展示 生效倍率×时段倍率;生图独立倍率行展示独立倍率;专属倍率划线展示原倍率) -->
+<!-- 折扣倍率(分时时段行展示 生效倍率×时段倍率;生图独立倍率行展示独立倍率;专属倍率划线展示原倍率) -->
           <td
             class="border-l border-gray-100 py-2.5 pl-3 pr-5 text-right align-middle font-mono text-xs dark:border-dark-700/60"
           >
