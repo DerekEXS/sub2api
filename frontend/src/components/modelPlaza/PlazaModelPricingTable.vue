@@ -387,6 +387,9 @@ const sortedModels = computed(() => {
 
 const effectiveRate = computed(() => props.userRateMultiplier ?? props.rateMultiplier)
 
+/** 用户专属倍率与分组默认不同:实付按专属倍率算,并划线展示原倍率。 */
+const hasCustomRate = computed(() => props.userRateMultiplier != null && props.userRateMultiplier !== props.rateMultiplier)
+
 function billingMode(m: PlazaModel): BillingMode {
   return (m.pricing?.billing_mode || BILLING_MODE_TOKEN) as BillingMode
 }
