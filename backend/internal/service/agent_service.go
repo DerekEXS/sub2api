@@ -465,12 +465,12 @@ func (c *httpAgentManagerClient) Archive(ctx context.Context, userID int64) (io.
 // 优先 openai 平台，无 openai 分组则选全量倍率最低者），并把该分组支持的模型名列表
 // 随 Create 请求透传给 manager（注入实例 config.json，限制实例可调用模型）。
 type apiKeyAgentProvisioner struct {
-	keyService     *APIKeyService
-	channelService *ChannelService
+	keyService        *APIKeyService
+	modelPlazaService *ModelPlazaService
 }
 
-func NewAPIKeyAgentProvisioner(keyService *APIKeyService, channelService *ChannelService) AgentKeyProvisioner {
-	return &apiKeyAgentProvisioner{keyService: keyService, channelService: channelService}
+func NewAPIKeyAgentProvisioner(keyService *APIKeyService, modelPlazaService *ModelPlazaService) AgentKeyProvisioner {
+	return &apiKeyAgentProvisioner{keyService: keyService, modelPlazaService: modelPlazaService}
 }
 
 func (p *apiKeyAgentProvisioner) Create(ctx context.Context, userID int64) (string, int64, []string, error) {
@@ -516,15 +516,15 @@ func pickAgentGroup(groups []Group) (Group, bool) {
 
 // groupModels 返回选定分组支持的模型名列表：
 //   - 分组显式配置了 models_list_config（CustomModelsListEnabled）时直接用其列表；
-//   - 否则走渠道聚合（ChannelService.ListPlazaGroups 的渠道 model_mapping/SupportedModels 口径）。
+//   - 否则走 ModelPlazaService.ListGroups 的渠道 model_mapping/SupportedModels 口径。
 func (p *apiKeyAgentProvisioner) groupModels(ctx context.Context, group *Group) []string {
 	if group.CustomModelsListEnabled() {
 		return append([]string(nil), group.ModelsListConfig.Models...)
 	}
-	if p.channelService == nil {
+	if p.modelPlazaService == nil {
 		return nil
 	}
-	plaza, err := p.channelService.ListPlazaGroups(ctx)
+	plaza, err := p.modelPlazaService.ListGroups(ctx)
 	if err != nil {
 		return nil // 模型列表是增强信息，拿不到不阻塞 key 创建
 	}
